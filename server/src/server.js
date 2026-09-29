@@ -1,6 +1,8 @@
 import http from 'node:http';
 import { createApp } from './app.js';
 import { config } from './config/index.js';
+import { getMigrationStatus } from './db/migrator.js';
+import { closePool, getDatabaseInfo, query } from './db/pool.js';
 import { logger } from './utils/logger.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -8,6 +10,32 @@ const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
 const server = http.createServer(createApp());
 // Step 5 attaches the WebSocket manager to this same HTTP server (shared port, path /ws).
+
+/**
+ * Startup database check. The API starts even when PostgreSQL is down: /api/health then reports
+ * 503, and the pool connects automatically once the database is back. Failing to start would
+ * hide that diagnostic from the UI.
+ */
+async function verifyDatabase() {
+  const { host, port, name } = config.database.target;
+  try {
+    const info = await getDatabaseInfo();
+    logger.info(
+      { host, port, database: info.database, serverVersion: info.version },
+      'Connected to PostgreSQL',
+    );
+
+    const { pending } = await getMigrationStatus(query);
+    if (pending.length > 0) {
+      logger.warn({ pending }, 'Database schema is out of date. Run: npm run db:migrate');
+    }
+  } catch (error) {
+    logger.error(
+      { err: error, host, port, database: name },
+      'PostgreSQL is not reachable. The API is running; /api/health reports 503 until it is.',
+    );
+  }
+}
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
@@ -29,6 +57,8 @@ server.listen(config.server.port, config.server.host, () => {
         'Keep HOST=127.0.0.1 until auth lands (Step 12).',
     );
   }
+
+  verifyDatabase();
 });
 
 let shuttingDown = false;
@@ -44,14 +74,25 @@ function shutdown(signal) {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Later steps also stop here: WebSocket clients (5), running scans (3/7), DB pool (2).
-  server.close((error) => {
-    if (error) {
-      logger.error({ err: error }, 'Error while closing HTTP server');
-      process.exit(1);
+  // Order matters: stop accepting requests and let in-flight ones finish (they may still need
+  // the database), then close the pool. Later steps add: WebSocket clients (5), scans (3/7).
+  server.close(async (serverError) => {
+    let exitCode = 0;
+    if (serverError) {
+      logger.error({ err: serverError }, 'Error while closing HTTP server');
+      exitCode = 1;
     }
+
+    try {
+      await closePool();
+      logger.info('Database pool closed');
+    } catch (poolError) {
+      logger.error({ err: poolError }, 'Error while closing database pool');
+      exitCode = 1;
+    }
+
     logger.info('Shutdown complete');
-    process.exit(0);
+    process.exit(exitCode);
   });
 }
 

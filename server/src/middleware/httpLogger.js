@@ -1,5 +1,5 @@
 import { pinoHttp } from 'pino-http';
-import { logger } from '../utils/logger.js';
+import { logger, serializeError } from '../utils/logger.js';
 
 /**
  * Logs exactly one line per request on completion, and attaches a request-scoped
@@ -17,5 +17,6 @@ export const httpLogger = pinoHttp({
   serializers: {
     req: (req) => ({ id: req.id, method: req.method, url: req.url }),
     res: (res) => ({ statusCode: res.statusCode }),
+    err: serializeError,
   },
 });

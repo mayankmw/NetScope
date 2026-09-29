@@ -23,7 +23,10 @@
     "test": "npm run test --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run lint && npm run test && npm run build"
+    "check": "npm run format:check && npm run lint && npm run test && npm run build",
+    "db:migrate": "npm run db:migrate -w server",
+    "db:migrate:down": "npm run db:migrate:down -w server",
+    "db:migrate:status": "npm run db:migrate:status -w server"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",

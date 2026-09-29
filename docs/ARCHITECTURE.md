@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 1 — foundation.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 2 — PostgreSQL foundation.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -99,7 +99,7 @@ netscope/
 │   │   ├── validators/            (3) zod schemas for params / query / body
 │   │   ├── middleware/            requestId, httpLogger, notFound, errorHandler; validate (3), rateLimit (7)
 │   │   ├── errors/                AppError + stable error codes
-│   │   ├── db/                    (2) pool.js, migrations/, repositories/
+│   │   ├── db/                    pool.js, errors.js, migrator.js, migrate.js (CLI), migrations/; repositories/ (3)
 │   │   ├── network/               (3) Discovery + diagnostics (see §5)
 │   │   ├── jobs/                  (3) In-process scan job runner
 │   │   ├── events/                (5) Internal event bus
@@ -184,9 +184,13 @@ Nothing points back.
   with per-field `details`. Body schemas are `strict` (unknown fields are rejected).
 - **Logging** — pino JSON logs in production, pretty single-line logs in development. Each
   request gets one completion log line carrying its request ID. Auth headers and cookies are redacted.
-- **Graceful shutdown** — on SIGINT/SIGTERM the server stops accepting connections and exits
-  once in-flight requests finish (forced after 10 s). Later steps add: close WebSocket clients,
-  cancel running scans, drain the DB pool.
+- **Database access** — one `pg` pool (`db/pool.js`). `query()` / `withTransaction()` turn driver
+  errors into `AppError`s (connection problems → 503 `DATABASE_UNAVAILABLE`, unique violations →
+  409 `CONFLICT`). The server starts even if PostgreSQL is down, and reports it via `/api/health`
+  (503). It warns at startup when migrations are pending. Details: [DATABASE.md](DATABASE.md).
+- **Graceful shutdown** — on SIGINT/SIGTERM the server stops accepting connections, waits for
+  in-flight requests, then closes the database pool (forced exit after 10 s). Later steps add:
+  close WebSocket clients, cancel running scans.
 - **Process safety** — unhandled rejections and uncaught exceptions are logged as fatal and the
   process exits; a supervisor restarts it _(Step 12)_.
 
@@ -427,32 +431,34 @@ defaults for later steps are proposals, finalized in their step.
 
 ### Server
 
-| Variable                      | Step | Default                 | Secret | Purpose                                                |
-| ----------------------------- | ---- | ----------------------- | ------ | ------------------------------------------------------ |
-| `NODE_ENV`                    | 1    | `development`           |        | `development` \| `test` \| `production`                |
-| `HOST`                        | 1    | `127.0.0.1`             |        | Bind address. Loopback until auth exists.              |
-| `PORT`                        | 1    | `4000`                  |        | HTTP + WebSocket port                                  |
-| `LOG_LEVEL`                   | 1    | `info`                  |        | pino level                                             |
-| `CORS_ORIGIN`                 | 1    | `http://localhost:5173` |        | Comma-separated browser origin allowlist               |
-| `DATABASE_URL`                | 2    | — (required)            | ✅     | `postgres://user:pass@host:5432/netscope`              |
-| `DATABASE_POOL_MAX`           | 2    | `10`                    |        | Max pooled connections                                 |
-| `DATABASE_SSL`                | 2    | `false`                 |        | TLS to PostgreSQL                                      |
-| `SCAN_INTERFACE`              | 3    | auto-detect             |        | Interface to monitor (`en0`, `eth0`)                   |
-| `SCAN_TIMEOUT_MS`             | 3    | `120000`                |        | Hard limit per scan job                                |
-| `PING_TIMEOUT_MS`             | 3    | `1000`                  |        | Per-host ping timeout                                  |
-| `PING_CONCURRENCY`            | 3    | `64`                    |        | Parallel pings during a sweep                          |
-| `WS_PATH`                     | 5    | `/ws`                   |        | WebSocket endpoint                                     |
-| `WS_HEARTBEAT_INTERVAL_MS`    | 5    | `30000`                 |        | Ping interval for dead-connection detection            |
-| `NMAP_PATH`                   | 7    | `nmap` from `PATH`      |        | nmap binary                                            |
-| `PORT_SCAN_PORTS`             | 7    | curated common ports    |        | Allowed port list (validated, hard-capped)             |
-| `SCAN_RATE_LIMIT_PER_HOUR`    | 7    | `30`                    |        | Scan requests per client per hour                      |
-| `SCAN_SCHEDULE_MINUTES`       | 9    | `0` (off)               |        | Periodic discovery interval                            |
-| `DATA_RETENTION_DAYS`         | 9    | `90`                    |        | Purge observations older than this                     |
-| `ALERT_OFFLINE_AFTER_MINUTES` | 10   | `15`                    |        | Absence before a device-offline alert                  |
-| `SESSION_SECRET`              | 12   | — (required in prod)    | ✅     | Signs session cookies                                  |
-| `ADMIN_PASSWORD_HASH`         | 12   | — (required in prod)    | ✅     | Login credential (argon2/bcrypt hash, never plaintext) |
-| `TRUST_PROXY`                 | 12   | `false`                 |        | Set when behind a reverse proxy                        |
-| `SERVE_CLIENT`                | 12   | `false`                 |        | Serve `client/dist` from Express (single origin)       |
+| Variable                         | Step | Default                 | Secret | Purpose                                                                 |
+| -------------------------------- | ---- | ----------------------- | ------ | ----------------------------------------------------------------------- |
+| `NODE_ENV`                       | 1    | `development`           |        | `development` \| `test` \| `production`                                 |
+| `HOST`                           | 1    | `127.0.0.1`             |        | Bind address. Loopback until auth exists.                               |
+| `PORT`                           | 1    | `4000`                  |        | HTTP + WebSocket port                                                   |
+| `LOG_LEVEL`                      | 1    | `info`                  |        | pino level                                                              |
+| `CORS_ORIGIN`                    | 1    | `http://localhost:5173` |        | Comma-separated browser origin allowlist                                |
+| `DATABASE_URL`                   | 2    | — (required)            | ✅     | `postgres://user:pass@host:5432/netscope` (TLS: `?sslmode=verify-full`) |
+| `DATABASE_POOL_MAX`              | 2    | `10`                    |        | Max pooled connections                                                  |
+| `DATABASE_CONNECTION_TIMEOUT_MS` | 2    | `5000`                  |        | Wait for a pooled connection before failing                             |
+| `DATABASE_STATEMENT_TIMEOUT_MS`  | 2    | `15000`                 |        | Server-side limit per SQL statement                                     |
+| `TEST_DATABASE_URL`              | 2    | — (tests only)          | ✅     | Database for `npm test`; name must end in `_test`                       |
+| `SCAN_INTERFACE`                 | 3    | auto-detect             |        | Interface to monitor (`en0`, `eth0`)                                    |
+| `SCAN_TIMEOUT_MS`                | 3    | `120000`                |        | Hard limit per scan job                                                 |
+| `PING_TIMEOUT_MS`                | 3    | `1000`                  |        | Per-host ping timeout                                                   |
+| `PING_CONCURRENCY`               | 3    | `64`                    |        | Parallel pings during a sweep                                           |
+| `WS_PATH`                        | 5    | `/ws`                   |        | WebSocket endpoint                                                      |
+| `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping interval for dead-connection detection                             |
+| `NMAP_PATH`                      | 7    | `nmap` from `PATH`      |        | nmap binary                                                             |
+| `PORT_SCAN_PORTS`                | 7    | curated common ports    |        | Allowed port list (validated, hard-capped)                              |
+| `SCAN_RATE_LIMIT_PER_HOUR`       | 7    | `30`                    |        | Scan requests per client per hour                                       |
+| `SCAN_SCHEDULE_MINUTES`          | 9    | `0` (off)               |        | Periodic discovery interval                                             |
+| `DATA_RETENTION_DAYS`            | 9    | `90`                    |        | Purge observations older than this                                      |
+| `ALERT_OFFLINE_AFTER_MINUTES`    | 10   | `15`                    |        | Absence before a device-offline alert                                   |
+| `SESSION_SECRET`                 | 12   | — (required in prod)    | ✅     | Signs session cookies                                                   |
+| `ADMIN_PASSWORD_HASH`            | 12   | — (required in prod)    | ✅     | Login credential (argon2/bcrypt hash, never plaintext)                  |
+| `TRUST_PROXY`                    | 12   | `false`                 |        | Set when behind a reverse proxy                                         |
+| `SERVE_CLIENT`                   | 12   | `false`                 |        | Serve `client/dist` from Express (single origin)                        |
 
 ### Client
 
@@ -466,7 +472,7 @@ defaults for later steps are proposals, finalized in their step.
 
 ## 10. Dependencies
 
-### Installed in Step 1
+### Installed so far
 
 | Package                                                    | Where        | Why                                                                            |
 | ---------------------------------------------------------- | ------------ | ------------------------------------------------------------------------------ |
@@ -493,12 +499,13 @@ defaults for later steps are proposals, finalized in their step.
 | `@fontsource-variable/geist`                               | client       | Self-hosted font; no third-party font CDN at runtime.                          |
 | `eslint-plugin-react-hooks`, `eslint-plugin-react-refresh` | client (dev) | Hooks rules; HMR-safe exports.                                                 |
 | `@types/react`, `@types/react-dom`                         | client (dev) | Editor IntelliSense in JavaScript files (no TypeScript compile).               |
+| `pg` _(Step 2)_                                            | server       | PostgreSQL driver with connection pooling.                                     |
+| `node-pg-migrate` _(Step 2)_                               | server       | Versioned plain-SQL migrations with locking and up/down support.               |
 
 ### Added in later steps
 
 | Package / tool                    | Step             | Why                                                                             |
 | --------------------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `pg`, `node-pg-migrate`           | 2                | PostgreSQL driver with pooling; plain-SQL, versioned migrations.                |
 | `zustand`                         | 4                | Shared client state (entity stores, UI preferences).                            |
 | `motion`                          | 4                | Animations and layout transitions.                                              |
 | `@testing-library/react`, `jsdom` | 4                | Component tests with Vitest.                                                    |
@@ -517,7 +524,7 @@ defaults for later steps are proposals, finalized in their step.
 | 4   | zod for all validation                         | One library for env, HTTP input, and WS messages.                                                                                                              | —                                                                        |
 | 5   | REST for commands, WebSocket for push only     | One validated write path; WS stays simple; snapshot + delta handles reconnects.                                                                                | —                                                                        |
 | 6   | `ws` over Socket.IO                            | Standard protocol, native browser client, no fallbacks needed on a LAN; reconnect and channels are ~100 lines.                                                 | We need rooms across multiple server instances.                          |
-| 7   | `pg` + SQL migrations over an ORM              | Native `inet` / `cidr` / `macaddr` types, explicit SQL, no codegen. Confirmed in Step 2.                                                                       | Query complexity makes a query builder worthwhile.                       |
+| 7   | `pg` + SQL migrations over an ORM              | Native `inet` / `cidr` / `macaddr` types, explicit SQL, no codegen. Implemented in Step 2 (node-pg-migrate, SQL files).                                        | Query complexity makes a query builder worthwhile.                       |
 | 8   | In-process job runner                          | Single host, one scan at a time; Redis/BullMQ would be operational overhead.                                                                                   | Multiple workers or durable queues are needed.                           |
 | 9   | Loopback bind by default, auth in Step 12      | A scanning API must not be reachable from the LAN without authentication.                                                                                      | —                                                                        |
 | 10  | Server runs on the host, not in Docker Desktop | On macOS/Windows containers live in a NAT'd VM and cannot see the LAN at layer 2. On Linux, `network_mode: host` works. PostgreSQL can run in Docker anywhere. | —                                                                        |

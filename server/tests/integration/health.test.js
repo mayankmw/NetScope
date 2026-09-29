@@ -1,11 +1,14 @@
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { createApp } from '../../src/app.js';
+import { closePool } from '../../src/db/pool.js';
 
 const app = createApp();
 
+afterAll(() => closePool());
+
 describe('GET /api/health', () => {
-  it('returns the service status in the success envelope', async () => {
+  it('reports the API and database as up in the success envelope', async () => {
     const res = await request(app).get('/api/health').expect('Content-Type', /json/).expect(200);
 
     expect(res.body).toEqual({
@@ -17,9 +20,26 @@ describe('GET /api/health', () => {
         environment: 'test',
         uptimeSeconds: expect.any(Number),
         timestamp: expect.any(String),
+        checks: {
+          api: { status: 'up' },
+          database: { status: 'up', latencyMs: expect.any(Number) },
+        },
       },
+      error: null,
     });
     expect(Number.isNaN(Date.parse(res.body.data.timestamp))).toBe(false);
+  });
+
+  it('never exposes database credentials or connection details', async () => {
+    const res = await request(app).get('/api/health').expect(200);
+    const body = JSON.stringify(res.body);
+    const databaseUrl = new URL(process.env.DATABASE_URL);
+
+    expect(body).not.toContain(process.env.DATABASE_URL);
+    expect(body).not.toContain(databaseUrl.host);
+    if (databaseUrl.password) {
+      expect(body).not.toContain(decodeURIComponent(databaseUrl.password));
+    }
   });
 
   it('assigns a request ID when the caller does not send one', async () => {
@@ -55,12 +75,13 @@ describe('error handling', () => {
 
     expect(res.body).toEqual({
       success: false,
+      data: null,
       error: {
         code: 'NOT_FOUND',
         message: expect.any(String),
         details: { method: 'GET', path: '/api/does-not-exist' },
+        requestId: res.headers['x-request-id'],
       },
-      requestId: res.headers['x-request-id'],
     });
   });
 
@@ -71,8 +92,11 @@ describe('error handling', () => {
       .send('{"broken":')
       .expect(400);
 
-    expect(res.body.success).toBe(false);
-    expect(res.body.error.code).toBe('INVALID_JSON');
+    expect(res.body).toMatchObject({
+      success: false,
+      data: null,
+      error: { code: 'INVALID_JSON' },
+    });
   });
 
   it('returns PAYLOAD_TOO_LARGE for an oversized body', async () => {

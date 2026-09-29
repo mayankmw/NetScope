@@ -2,9 +2,21 @@ import { z } from 'zod';
 
 const LOG_LEVELS = ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'];
 
+// Messages never echo the input value: DATABASE_URL contains credentials.
+const postgresUrl = z
+  .url({
+    protocol: /^postgres(ql)?$/,
+    error: (issue) =>
+      issue.input === undefined ? 'is required' : 'must be a postgres:// or postgresql:// URL',
+  })
+  .refine((value) => new URL(value).pathname.length > 1, 'must include a database name');
+
+const milliseconds = (min, max, fallback) =>
+  z.coerce.number().int().min(min).max(max).default(fallback);
+
 /**
- * Environment variables consumed in Step 1. Later steps extend this schema
- * (DATABASE_URL, WS_*, SCAN_*, ...) — see docs/ARCHITECTURE.md#environment-variables.
+ * Environment variables the server reads. Later steps extend this schema
+ * (WS_*, SCAN_*, ...) — see docs/ARCHITECTURE.md#9-environment-variables.
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -21,7 +33,25 @@ export const envSchema = z.object({
         .filter(Boolean),
     )
     .pipe(z.array(z.url({ protocol: /^https?$/ })).min(1)),
+
+  DATABASE_URL: postgresUrl,
+  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
+  DATABASE_CONNECTION_TIMEOUT_MS: milliseconds(100, 60_000, 5_000),
+  DATABASE_STATEMENT_TIMEOUT_MS: milliseconds(100, 600_000, 15_000),
 });
+
+/**
+ * Non-secret description of the database target, safe to log.
+ * @param {string} databaseUrl
+ */
+function describeDatabase(databaseUrl) {
+  const url = new URL(databaseUrl);
+  return {
+    host: url.hostname,
+    port: Number(url.port) || 5432,
+    name: decodeURIComponent(url.pathname.slice(1)),
+  };
+}
 
 /**
  * Validates raw environment variables and maps them to the app's config shape.
@@ -60,6 +90,15 @@ export function parseEnv(env, appInfo) {
     },
     cors: {
       origins: vars.CORS_ORIGIN,
+    },
+    database: {
+      /** Contains credentials. Pass it to the driver only; never log or return it. */
+      url: vars.DATABASE_URL,
+      /** Host, port, and database name: safe to log. */
+      target: describeDatabase(vars.DATABASE_URL),
+      poolMax: vars.DATABASE_POOL_MAX,
+      connectionTimeoutMs: vars.DATABASE_CONNECTION_TIMEOUT_MS,
+      statementTimeoutMs: vars.DATABASE_STATEMENT_TIMEOUT_MS,
     },
   };
 }

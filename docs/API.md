@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 1.** Only `GET /api/health` is implemented. Everything else is the plan, and
+> Status: **Step 2.** Only `GET /api/health` is implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -19,36 +19,38 @@
 
 ## 2. Response envelope
 
-Every response, success or failure, uses one of two shapes.
+Every response has the same three top-level keys: `success`, `data`, and `error`.
 
-**Success**
+**Success:** `error` is always `null`.
 
 ```json
 {
   "success": true,
   "data": {},
-  "meta": { "page": 1, "pageSize": 50, "total": 42, "totalPages": 1 }
+  "error": null
 }
 ```
 
-`meta` appears only when relevant (pagination).
+Paginated lists add `"meta": { "page": 1, "pageSize": 50, "total": 42, "totalPages": 1 }`.
 
-**Failure**
+**Failure:** `data` is always `null`.
 
 ```json
 {
   "success": false,
+  "data": null,
   "error": {
     "code": "VALIDATION_ERROR",
     "message": "Request validation failed.",
-    "details": [{ "path": "body.displayName", "message": "Too long" }]
-  },
-  "requestId": "b3c1e2a4-5d6f-4a7b-8c9d-0e1f2a3b4c5d"
+    "details": [{ "path": "body.displayName", "message": "Too long" }],
+    "requestId": "b3c1e2a4-5d6f-4a7b-8c9d-0e1f2a3b4c5d"
+  }
 }
 ```
 
 Clients branch on `error.code`, never on `message`. `details` is optional and structured.
-Internal error details (stack traces, SQL, command output) are never returned.
+`requestId` matches the `X-Request-Id` header and the server's log line for that request.
+Internal details (stack traces, SQL, driver messages, hostnames, credentials) are never returned.
 
 ## 3. Status codes
 
@@ -76,9 +78,10 @@ Internal error details (stack traces, SQL, command output) are never returned.
 | `INVALID_JSON`         | 400    | 1     | Body is not valid JSON                             |
 | `VALIDATION_ERROR`     | 400    | 3     | Params, query, or body failed validation           |
 | `NOT_FOUND`            | 404    | 1     | Route or resource does not exist                   |
+| `CONFLICT`             | 409    | 2     | Request conflicts with existing data               |
 | `PAYLOAD_TOO_LARGE`    | 413    | 1     | Body exceeds the limit                             |
 | `INTERNAL_ERROR`       | 500    | 1     | Unexpected failure; see server logs by `requestId` |
-| `DATABASE_UNAVAILABLE` | 503    | 2     | PostgreSQL unreachable                             |
+| `DATABASE_UNAVAILABLE` | 503    | 2     | PostgreSQL unreachable, timed out, or rejecting us |
 | `SCAN_IN_PROGRESS`     | 409    | 3     | Only one scan may run at a time                    |
 | `TARGET_NOT_ALLOWED`   | 422    | 3     | Target is outside the local private subnet         |
 | `TOOL_UNAVAILABLE`     | 503    | 3     | Required system tool (e.g. nmap) not installed     |
@@ -98,12 +101,10 @@ The client adds its own codes when no envelope is available: `NETWORK_ERROR`, `T
 
 ### `GET /api/health`
 
-Liveness of the API process. Step 2 adds `checks.database`, and the endpoint returns `503` when a
-dependency is down.
+Verifies that the API is running **and** PostgreSQL answers a round-trip query. Monitors can rely
+on the status code alone: `200` when every check is up, `503` otherwise.
 
-```http
-GET /api/health
-```
+**200 OK**
 
 ```json
 {
@@ -114,10 +115,36 @@ GET /api/health
     "version": "0.1.0",
     "environment": "development",
     "uptimeSeconds": 42,
-    "timestamp": "2026-09-29T12:00:00.000Z"
+    "timestamp": "2026-09-29T12:00:00.000Z",
+    "checks": {
+      "api": { "status": "up" },
+      "database": { "status": "up", "latencyMs": 1.2 }
+    }
+  },
+  "error": null
+}
+```
+
+**503 Service Unavailable** (the same report, in `error.details`)
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "DATABASE_UNAVAILABLE",
+    "message": "The database is unavailable.",
+    "details": {
+      "status": "degraded",
+      "checks": { "api": { "status": "up" }, "database": { "status": "down" } }
+    },
+    "requestId": "59d64560-96b4-41bf-8e3b-7c93ea148672"
   }
 }
 ```
+
+(`details` also carries `service`, `version`, `environment`, `uptimeSeconds`, and `timestamp`;
+shortened here.) The reason for the failure is logged on the server, never returned.
 
 ## 7. Planned endpoints
 

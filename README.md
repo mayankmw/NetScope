@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 1 of 12 — architecture and project foundation. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 2 of 12 — PostgreSQL and backend foundation. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -61,19 +61,43 @@ Data model: [docs/DATABASE.md](docs/DATABASE.md)
 | Node.js        | ≥ 22.13 (see `.nvmrc`) | Step 1                                                                      |
 | npm            | ≥ 10                   | Step 1                                                                      |
 | macOS or Linux | —                      | Step 1                                                                      |
-| PostgreSQL     | ≥ 16                   | Step 2                                                                      |
+| PostgreSQL     | ≥ 16                   | Step 2 — `brew install postgresql@16` / `sudo apt install postgresql`       |
 | nmap           | ≥ 7.9                  | Step 7 (optional in Step 3) — `brew install nmap` / `sudo apt install nmap` |
 
-### Install and run
+### 1. Install
 
 ```bash
 git clone https://github.com/mayankmw/NetScope.git
 cd NetScope
 npm install
-
 cp server/.env.example server/.env
 cp client/.env.example client/.env
+```
 
+### 2. Create the databases
+
+Connect as a PostgreSQL superuser (on Homebrew this is usually your macOS user):
+
+```bash
+psql -d postgres
+```
+
+```sql
+CREATE ROLE netscope WITH LOGIN;
+\password netscope
+CREATE DATABASE netscope OWNER netscope;
+CREATE DATABASE netscope_test OWNER netscope;
+\q
+```
+
+`\password` prompts for the password, so it never lands in your shell or psql history. Put it
+in `DATABASE_URL` and `TEST_DATABASE_URL` in `server/.env`, percent-encoding special characters
+(`@` → `%40`).
+
+### 3. Migrate and run
+
+```bash
+npm run db:migrate
 npm run dev
 ```
 
@@ -87,17 +111,20 @@ only ever talks to its own origin.
 
 Run from the repository root.
 
-| Command              | What it does                                                  |
-| -------------------- | ------------------------------------------------------------- |
-| `npm run dev`        | Start API (watch mode) and UI (HMR) together                  |
-| `npm run dev:server` | API only                                                      |
-| `npm run dev:client` | UI only                                                       |
-| `npm run build`      | Production build of the UI → `client/dist`                    |
-| `npm start`          | Start the API without watch mode                              |
-| `npm test`           | Run all test suites                                           |
-| `npm run lint`       | ESLint across workspaces                                      |
-| `npm run format`     | Format everything with Prettier                               |
-| `npm run check`      | Format check + lint + tests + build (run before every commit) |
+| Command                     | What it does                                                   |
+| --------------------------- | -------------------------------------------------------------- |
+| `npm run dev`               | Start API (watch mode) and UI (HMR) together                   |
+| `npm run dev:server`        | API only                                                       |
+| `npm run dev:client`        | UI only                                                        |
+| `npm run build`             | Production build of the UI → `client/dist`                     |
+| `npm start`                 | Start the API without watch mode                               |
+| `npm test`                  | Run all test suites (needs PostgreSQL and `TEST_DATABASE_URL`) |
+| `npm run lint`              | ESLint across workspaces                                       |
+| `npm run format`            | Format everything with Prettier                                |
+| `npm run check`             | Format check + lint + tests + build (run before every commit)  |
+| `npm run db:migrate`        | Apply pending database migrations                              |
+| `npm run db:migrate:down`   | Revert the most recent migration                               |
+| `npm run db:migrate:status` | List applied and pending migrations                            |
 
 ## Configuration
 
@@ -121,7 +148,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 ## Roadmap
 
 1. ✅ Architecture and development setup
-2. PostgreSQL setup
+2. ✅ PostgreSQL setup
 3. Device discovery
 4. Device list UI
 5. Live WebSocket updates

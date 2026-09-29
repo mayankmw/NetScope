@@ -39,7 +39,7 @@ async function readJson(response) {
 }
 
 function toApiError(response, payload) {
-  const requestId = payload?.requestId ?? response.headers.get('X-Request-Id') ?? undefined;
+  const requestId = payload?.error?.requestId ?? response.headers.get('X-Request-Id') ?? undefined;
 
   if (payload?.success === false && payload.error) {
     return new ApiError(payload.error.message, {

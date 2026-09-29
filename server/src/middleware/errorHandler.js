@@ -48,13 +48,15 @@ export function errorHandler(err, req, res, next) {
   }
 
   const appError = err instanceof AppError ? err : fromBodyParserError(err);
+  const statusCode = appError?.statusCode ?? 500;
 
-  if (!appError) {
-    // Unexpected error = bug. pino-http logs `res.err` (with stack) on the request's log line.
+  if (statusCode >= 500) {
+    // Server-side failures (bugs, database outages) are logged with stack and `cause` by
+    // pino-http on the request's single log line. 4xx errors are the client's; no stack needed.
     res.err = err;
   }
 
-  res.status(appError?.statusCode ?? 500).json(
+  res.status(statusCode).json(
     buildErrorBody({
       code: appError?.code ?? ErrorCodes.INTERNAL_ERROR,
       message: clientMessage(appError, err),
