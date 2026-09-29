@@ -1,0 +1,31 @@
+# NetScope Roadmap
+
+Each step is built on the `development` branch, verified with its testing checklist, and
+committed. The next step starts only after the current one works.
+
+## Definition of done (every step)
+
+- [ ] The step's features work end to end, and its testing checklist passes.
+- [ ] `npm run check` passes (format, lint, tests, build).
+- [ ] New logic has tests: unit tests for pure logic, integration tests for endpoints.
+- [ ] Every input is validated and every error path returns the standard envelope.
+- [ ] No secrets or environment-specific values in code; new variables are added to `.env.example` and the docs.
+- [ ] Docs are updated (README, architecture/API/database as relevant).
+- [ ] Committed to `development` with a Conventional Commit message.
+
+## Milestones
+
+| #   | Milestone                | Done means                                                                                                                                                                                                                                                                         |
+| --- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Architecture & dev setup | Workspaces install cleanly; `npm run dev` starts API and UI; the UI shows live API status through the proxy; `GET /api/health` returns the envelope; errors are enveloped; config is validated at startup; `npm run check` passes; architecture docs written.                      |
+| 2   | PostgreSQL setup         | Pool configured from `DATABASE_URL`; migrations run up and down; core tables exist; health reports DB status (503 when down); repository pattern with tests on a test DB; pool drained on shutdown.                                                                                |
+| 3   | Device discovery         | Interface, subnet, and gateway detected; `POST /api/scans` runs discovery as a job (202); devices upserted by MAC and observations stored; target guard and safe exec unit-tested; parsers tested with fixtures; works without root on macOS and Linux; a second scan returns 409. |
+| 4   | Device list UI           | App shell (sidebar, top bar, responsive); dashboard stat cards; device table with search, filter, and sort; loading, empty, and error states; Zustand device store; Scan now button.                                                                                               |
+| 5   | Live WebSocket updates   | `/ws` with heartbeat; event bus; scan and device events broadcast; UI updates without refresh; connection indicator; reconnect with backoff and REST resync; origin check and message validation.                                                                                  |
+| 6   | Device details           | Details page (identity, vendor, first/last seen, IP); edit name, notes, type, and trusted flag (validated PATCH); on-demand ping diagnostic.                                                                                                                                       |
+| 7   | Safe port scanning       | Single-device TCP connect scan over a bounded port list; guard enforced; rate limited; results stored and shown; missing nmap → clear `TOOL_UNAVAILABLE`.                                                                                                                          |
+| 8   | Network topology         | Lazy-loaded Cytoscape view; gateway-centred layout; status colouring; click-through to device details; live updates.                                                                                                                                                               |
+| 9   | Historical scans         | Scan history list and detail; device presence timeline; scheduled discovery; retention purge.                                                                                                                                                                                      |
+| 10  | New-device alerts        | Rules (new device, offline, returned, IP changed, new open port); alerts page with acknowledge; live toasts; unread badge.                                                                                                                                                         |
+| 11  | Report export            | Device inventory and scan results as CSV and JSON, streamed with correct headers; errors enveloped.                                                                                                                                                                                |
+| 12  | Deployment               | Express serves the built client (single origin); authentication; hardened headers and CSP; process supervision (systemd or Docker with host networking on Linux); backups; CI pipeline; runbook.                                                                                   |
