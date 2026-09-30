@@ -1,25 +1,37 @@
-import { Radar } from 'lucide-react';
-import { Link, Outlet } from 'react-router';
+import { motion } from 'motion/react';
+import { useLocation, useOutlet } from 'react-router';
+import { Toaster } from '@/components/common/Toaster';
+import { Sidebar } from '@/components/layout/Sidebar';
+import { TopBar } from '@/components/layout/TopBar';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 /**
- * Application shell. Step 4 grows this into the full layout
- * (sidebar navigation, top bar with scan controls and live-connection indicator).
+ * Application shell: sidebar (desktop), sticky top bar, and the routed page, which fades in on
+ * navigation. Toasts and tooltips are provided here for every page.
  */
 export function AppLayout() {
-  return (
-    <div className="flex min-h-svh flex-col bg-background text-foreground">
-      <header className="border-b">
-        <div className="mx-auto flex h-14 w-full max-w-6xl items-center px-4 sm:px-6">
-          <Link to="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <Radar className="size-5 text-primary" aria-hidden="true" />
-            NetScope
-          </Link>
-        </div>
-      </header>
+  const { pathname } = useLocation();
+  const outlet = useOutlet();
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
-        <Outlet />
-      </main>
-    </div>
+  return (
+    <TooltipProvider delayDuration={250}>
+      <div className="flex min-h-svh">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar />
+          <main className="mx-auto w-full max-w-[1400px] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+            <motion.div
+              key={pathname}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
+            >
+              {outlet}
+            </motion.div>
+          </main>
+        </div>
+      </div>
+      <Toaster />
+    </TooltipProvider>
   );
 }

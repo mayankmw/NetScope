@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 3.** `GET /api/health` and `POST /api/devices/discover` are implemented. Everything else is the plan, and
+> Status: **Step 4.** `GET /api/health`, `GET /api/devices`, and `POST /api/devices/discover` are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -151,6 +151,58 @@ on the status code alone: `200` when every check is up, `503` otherwise.
 (`details` also carries `service`, `version`, `environment`, `uptimeSeconds`, and `timestamp`;
 shortened here.) The reason for the failure is logged on the server, never returned.
 
+### `GET /api/devices`
+
+The device inventory of one network: every device ever seen there, online and offline, ordered by
+IP. By default the most recently seen network (the one this machine is on); `?networkId=<uuid>`
+selects another. Before the first discovery, `network` is `null` and `devices` is empty.
+
+The whole inventory is returned at once: sweeps are capped at a /22, so a network holds at most
+~1,000 devices, and the client filters and sorts in memory. Unknown query parameters are rejected.
+
+```json
+{
+  "success": true,
+  "data": {
+    "network": {
+      "id": "5c50d134-16e1-401a-8a6a-2940b6e9d204",
+      "name": null,
+      "cidr": "192.168.1.0/24",
+      "interfaceName": "en0",
+      "gatewayIpAddress": "192.168.1.1",
+      "gatewayMacAddress": "a4:83:e7:00:01:01",
+      "firstSeenAt": "2026-09-18T10:02:11.000Z",
+      "lastSeenAt": "2026-09-30T13:34:45.929Z",
+      "lastScan": {
+        "id": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+        "finishedAt": "2026-09-30T13:34:45.929Z"
+      }
+    },
+    "devices": [
+      {
+        "id": "8f2c1d3e-6b7a-4c9d-8e1f-2a3b4c5d6e7f",
+        "ipAddress": "192.168.1.20",
+        "macAddress": "b8:27:eb:12:34:56",
+        "macIsRandom": false,
+        "hostname": "raspberrypi.lan",
+        "vendor": "Raspberry Pi Foundation",
+        "deviceType": "computer",
+        "displayName": null,
+        "isTrusted": false,
+        "status": "online",
+        "isGateway": false,
+        "firstSeenAt": "2026-09-20T08:12:03.114Z",
+        "lastSeenAt": "2026-09-30T13:34:45.929Z"
+      }
+    ]
+  },
+  "error": null
+}
+```
+
+Errors: `400 VALIDATION_ERROR` (malformed `networkId` or unknown parameter), `404 NOT_FOUND`
+(unknown network), `503 DATABASE_UNAVAILABLE`.
+
 ### `POST /api/devices/discover`
 
 Discovers the devices currently visible on the local network, stores them, and returns the
@@ -265,15 +317,15 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
 
 ### `/api/devices`
 
-| Method & path                                  | Step | Purpose                                                  |
-| ---------------------------------------------- | ---- | -------------------------------------------------------- |
-| `POST /api/devices/discover`                   | 3 ✅ | Run discovery (implemented, see above)                   |
-| `GET /api/devices`                             | 4    | List devices (filter `status`, `search`; sort; paginate) |
-| `GET /api/devices/:deviceId`                   | 6    | Device details                                           |
-| `PATCH /api/devices/:deviceId`                 | 6    | Edit `displayName`, `notes`, `deviceType`, `isTrusted`   |
-| `POST /api/devices/:deviceId/diagnostics/ping` | 6    | On-demand ping (latency, loss)                           |
-| `GET /api/devices/:deviceId/ports`             | 7    | Latest port-check results                                |
-| `GET /api/devices/:deviceId/history`           | 9    | Presence and IP timeline                                 |
+| Method & path                                  | Step | Purpose                                                |
+| ---------------------------------------------- | ---- | ------------------------------------------------------ |
+| `POST /api/devices/discover`                   | 3 ✅ | Run discovery (implemented, see above)                 |
+| `GET /api/devices`                             | 4 ✅ | Device inventory (implemented, see above)              |
+| `GET /api/devices/:deviceId`                   | 6    | Device details                                         |
+| `PATCH /api/devices/:deviceId`                 | 6    | Edit `displayName`, `notes`, `deviceType`, `isTrusted` |
+| `POST /api/devices/:deviceId/diagnostics/ping` | 6    | On-demand ping (latency, loss)                         |
+| `GET /api/devices/:deviceId/ports`             | 7    | Latest port-check results                              |
+| `GET /api/devices/:deviceId/history`           | 9    | Presence and IP timeline                               |
 
 ### `/api/scans`
 

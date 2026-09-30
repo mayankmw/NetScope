@@ -7,6 +7,7 @@ import { AppError } from '../errors/AppError.js';
 import { ErrorCodes } from '../errors/errorCodes.js';
 import * as network from '../network/index.js';
 import { logger } from '../utils/logger.js';
+import { toDeviceDto } from './dto.js';
 
 const { NetworkError, NetworkErrorCodes } = network;
 
@@ -64,16 +65,10 @@ async function runSource(name, log, signal, probe) {
   }
 }
 
+/** The stored device plus what this particular scan observed. */
 function toDeviceResponse(row, device) {
   return {
-    id: row.id,
-    ipAddress: row.ip_address,
-    macAddress: row.mac_address,
-    macIsRandom: row.mac_is_random,
-    hostname: row.hostname,
-    vendor: row.vendor,
-    deviceType: row.device_type,
-    status: row.status,
+    ...toDeviceDto(row),
     latencyMs: device.latencyMs,
     isGateway: device.isGateway,
     isSelf: device.isSelf,
@@ -81,8 +76,6 @@ function toDeviceResponse(row, device) {
     previousIpAddress:
       row.is_new || row.previous_ip_address === row.ip_address ? null : row.previous_ip_address,
     sources: device.sources,
-    firstSeenAt: row.first_seen_at,
-    lastSeenAt: row.last_seen_at,
   };
 }
 

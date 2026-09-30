@@ -82,3 +82,21 @@ export async function insertObservation(db, { scanId, deviceId, ipAddress, hostn
     [scanId, deviceId, ipAddress, hostname, latencyMs],
   );
 }
+
+/**
+ * Every device known on a network, online and offline, ordered by IP.
+ *
+ * @param {Executor} db
+ * @param {string} networkId
+ */
+export async function listDevicesByNetwork(db, networkId) {
+  const { rows } = await db.query(
+    `SELECT d.*, d.mac_address = n.gateway_mac AS is_gateway
+     FROM devices d
+     JOIN networks n ON n.id = d.network_id
+     WHERE d.network_id = $1
+     ORDER BY d.ip_address`,
+    [networkId],
+  );
+  return rows;
+}

@@ -32,5 +32,25 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    build: {
+      rolldownOptions: {
+        output: {
+          // Third-party code in its own chunk: it changes far less often than app code, so
+          // browsers keep it cached across NetScope updates. Pages are split per route.
+          codeSplitting: {
+            groups: [{ name: 'vendor', test: /node_modules/ }],
+          },
+        },
+      },
+      // The vendor chunk (React, React Router, Motion, Radix) is ~600 kB minified / ~195 kB
+      // gzipped and loads once; the limit flags regressions beyond that baseline.
+      chunkSizeWarningLimit: 650,
+    },
+    test: {
+      environment: 'jsdom',
+      include: ['src/**/*.test.{js,jsx}'],
+      setupFiles: ['./src/test/setup.js'],
+      css: false,
+    },
   };
 });

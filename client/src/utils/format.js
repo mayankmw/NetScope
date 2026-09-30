@@ -25,3 +25,40 @@ export function formatDuration(totalSeconds) {
 export function formatTime(value) {
   return new Date(value).toLocaleTimeString();
 }
+
+/**
+ * Full local date and time, e.g. "30 Sep 2026, 19:04".
+ * @param {string | number | Date} value
+ */
+export function formatDateTime(value) {
+  return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+const relativeFormatter = new Intl.RelativeTimeFormat(undefined, {
+  numeric: 'auto',
+  style: 'short',
+});
+
+const RELATIVE_STEPS = [
+  ['second', 60],
+  ['minute', 60],
+  ['hour', 24],
+  ['day', 30],
+  ['month', 12],
+  ['year', Infinity],
+];
+
+/**
+ * Human-friendly time relative to `now`, e.g. "just now", "5 min. ago", "yesterday".
+ * @param {string | number | Date} value
+ * @param {number} [now] epoch ms
+ */
+export function formatRelativeTime(value, now = Date.now()) {
+  let delta = (new Date(value).getTime() - now) / 1000;
+  if (Math.abs(delta) < 45) return 'just now';
+  for (const [unit, size] of RELATIVE_STEPS) {
+    if (Math.abs(delta) < size) return relativeFormatter.format(Math.round(delta), unit);
+    delta /= size;
+  }
+  return relativeFormatter.format(Math.round(delta), 'year');
+}

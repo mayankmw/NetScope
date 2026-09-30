@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 3 — device discovery.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 4 — device list UI.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -64,31 +64,39 @@ netscope/
 ├── client/                        React SPA (Vite)
 │   ├── public/                    Static files served as-is (favicon)
 │   ├── src/
-│   │   ├── app/                   Bootstrap: App, router, app-wide providers
+│   │   ├── app/                   App (MotionConfig), router (lazy pages), navigation config
 │   │   ├── components/
 │   │   │   ├── ui/                shadcn/ui primitives (generated — do not hand-edit)
-│   │   │   ├── system/            API / connection status
-│   │   │   ├── common/            (4) Shared building blocks: StatCard, EmptyState, StatusDot
-│   │   │   ├── devices/           (4) Device table, filters, device card
-│   │   │   ├── scans/             (3/9) Scan button, progress, history
+│   │   │   ├── common/            GlassPanel, PageHeader, StatCard, EmptyState, ErrorState,
+│   │   │   │                      StatusDot, Tag, RelativeTime, SearchInput, SegmentedControl,
+│   │   │   │                      FilterMenu, Toaster
+│   │   │   ├── layout/            Sidebar, SidebarNav, MobileNav, TopBar, Brand, ScanProgressBar
+│   │   │   ├── devices/           DeviceTable, DeviceGrid/Card, DeviceToolbar, DiscoverButton,
+│   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, attributes, skeleton
+│   │   │   ├── network/           NetworkPanel
+│   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
 │   │   │   ├── topology/          (8) Cytoscape graph wrapper
-│   │   │   └── alerts/            (10) Alert list, toasts
+│   │   │   └── alerts/            (10) Alert list
 │   │   ├── config/                env.js — the only reader of import.meta.env
-│   │   ├── hooks/                 Reusable hooks (useApiHealth; useSocketEvent (5))
-│   │   ├── layouts/               AppLayout; Sidebar + TopBar (4)
-│   │   ├── lib/                   shadcn `cn` helper and configured third-party adapters
-│   │   ├── pages/                 One component per route
-│   │   ├── services/              apiClient + one module per API resource; socketClient (5)
-│   │   ├── stores/                (4) Zustand stores
-│   │   ├── types/                 JSDoc typedefs for API / WebSocket contracts
-│   │   ├── utils/                 Pure helpers (formatting, sorting)
-│   │   ├── index.css              Tailwind entry + theme tokens
+│   │   ├── constants/             deviceTypes.js (labels for device_types codes)
+│   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
+│   │   │                          useSystemHealth, useMediaQuery, useNow, useKeyboardShortcut
+│   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
+│   │   ├── lib/                   shadcn `cn` helper
+│   │   ├── pages/                 DashboardPage, DevicesPage, NotFoundPage, RouteErrorPage
+│   │   ├── services/              apiClient, deviceService, healthService; socketClient (5)
+│   │   ├── stores/                useDeviceStore, useSystemStore, useUiStore (Zustand)
+│   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
+│   │   ├── types/                 JSDoc typedefs for API contracts
+│   │   ├── utils/                 deviceFilters (search/filter/sort/URL), format, ip
+│   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
 │   ├── components.json            shadcn/ui configuration
 │   ├── eslint.config.js
+│   ├── index.html                 <html class="dark">
 │   ├── jsconfig.json              `@/` path alias for editors
-│   └── vite.config.js             Plugins, alias, dev proxy
+│   └── vite.config.js             Plugins, alias, dev proxy, vendor chunk, Vitest config
 │
 ├── server/                        Express API + WebSocket + network layer
 │   ├── src/
@@ -359,29 +367,52 @@ Imports use the `@/` alias (`@/services/apiClient`).
 
 ### 7.2 State strategy
 
-| Kind of state                              | Where it lives                                                    |
-| ------------------------------------------ | ----------------------------------------------------------------- |
-| Ephemeral UI (dialog open, input text)     | Component `useState`                                              |
-| One-off request tied to a component        | A hook (e.g. `useApiHealth`)                                      |
-| Shared entities updated by REST **and** WS | Zustand stores, normalized (`byId` map + ordered IDs) _(Step 4+)_ |
-| UI preferences (theme, sidebar)            | `useUiStore` with `persist` → localStorage _(Step 4)_             |
-| Route state (filters, selected device)     | URL (path params, search params) so views are linkable            |
+| Kind of state                        | Where it lives                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------- |
+| Ephemeral UI (menu open, input text) | Component `useState`                                                         |
+| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`  |
+| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard        |
+| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)       |
+| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable |
 
-Planned stores: `useDeviceStore`, `useScanStore`, `useAlertStore`, `useConnectionStore`, `useUiStore`.
-Components subscribe with selectors (`useDeviceStore((s) => s.byId[id])`) to limit re-renders.
+Data flow: **component → hook → store action → service → apiClient**. Components never call
+services or `fetch`. Stores expose actions (`fetchDevices`, `discoverNetwork`, `checkHealth`);
+hooks add page concerns (load-if-stale, toasts, URL sync). Components subscribe with narrow
+selectors to limit re-renders.
 
-TanStack Query is deliberately not used. Most data here arrives by server push into shared entity
-state, and Zustand covers both push and fetch with one model. Revisit if caching or refetch logic grows.
+- `fetchDevices` cancels an older in-flight request. A failed refresh keeps the loaded data and
+  surfaces the error inline; only a failed first load shows the full error state.
+- `discoverNetwork` runs the scan, remembers IP changes for this session, then reloads the full
+  inventory (the discovery response omits devices that went offline).
+- Search, filtering, and sorting run client-side in pure functions (`utils/deviceFilters.js`): a
+  network holds at most ~1,000 devices, so no server-side pagination is needed.
+
+Planned stores: `useScanStore`, `useAlertStore`, `useConnectionStore` (Steps 5–10). TanStack Query
+is deliberately not used: most data will arrive by server push into shared entity state, and
+Zustand covers both push and fetch with one model.
 
 ### 7.3 Other decisions
 
 - **Routing** — React Router data mode (`createBrowserRouter`). A pathless error route keeps the
-  layout visible when a page throws. Heavy pages are route-level code-split with `lazy`
-  (Topology, which pulls in Cytoscape).
+  layout visible when a page throws. Every page is route-level code-split with `lazy`; third-party
+  code is a separate `vendor` chunk so it stays cached across app updates.
 - **Styling** — Tailwind v4 with shadcn/ui CSS-variable tokens. Generated `components/ui/*` files
   are not hand-edited; wrap or compose them instead.
-- **Motion** _(Step 4)_ — the `motion` package (formerly Framer Motion, imported from `motion/react`)
-  for list enter/exit and layout transitions, wrapped in `<MotionConfig reducedMotion="user">`.
+- **Motion** — the `motion` package (formerly Framer Motion, imported from `motion/react`) for page
+  fades, stat-card and card-grid staggers, the segmented-control indicator, and the scan progress
+  line. Wrapped in `<MotionConfig reducedMotion="user">`; CSS animations use `motion-safe:`.
+- **Responsive** — sidebar at ≥ 1024 px (collapsible to an icon rail), slide-out sheet below. The
+  device list renders a sortable table at ≥ 768 px and cards below (`useMediaQuery` renders one,
+  not both). A sort control replaces the table headers on narrow screens.
+- **Visual language** — dark only (`<html class="dark">`). Deep blue-black background with two
+  faint colour fields and a 32 px grid; `glass-panel` surfaces (translucent card, blur, hairline
+  border); one primary neon (cyan) for actions, focus, and the active nav item; magenta only for
+  "new"; green online, amber warning, red error. Glow is limited to the primary button, the active
+  nav marker, and status dots. Geist for text, Geist Mono for IPs and MACs; muted text keeps
+  ≥ 4.5:1 contrast.
+- **Accessibility** — semantic table with `aria-sort`, radio-group status filter with arrow keys,
+  labelled icon buttons, visible focus rings, "/" focuses search, Escape clears it, missing
+  values read as "Unknown".
 - **Topology** _(Step 8)_ — a `TopologyGraph` component owns a Cytoscape instance imperatively
   (ref + effect) and applies incremental diffs rather than re-creating the graph on each update.
 
@@ -389,18 +420,18 @@ state, and Zustand covers both push and fetch with one model. Revisit if caching
 
 ### 8.1 Routes
 
-| Path                 | Page                         | Step  | Purpose                                        |
-| -------------------- | ---------------------------- | ----- | ---------------------------------------------- |
-| `/`                  | `HomePage` → `DashboardPage` | 1 → 4 | Step 1: API status. Step 4+: network overview. |
-| `/devices`           | `DevicesPage`                | 4     | Searchable, filterable device inventory        |
-| `/devices/:deviceId` | `DeviceDetailsPage`          | 6     | Identity, history, diagnostics, ports          |
-| `/topology`          | `TopologyPage`               | 8     | Interactive network map                        |
-| `/scans`             | `ScansPage`                  | 9     | Scan history                                   |
-| `/scans/:scanId`     | `ScanDetailsPage`            | 9     | What a scan found / changed                    |
-| `/alerts`            | `AlertsPage`                 | 10    | Alert inbox with acknowledge                   |
-| `/reports`           | `ReportsPage`                | 11    | Export inventory and scan results              |
-| `/settings`          | `SettingsPage`               | later | Scan schedule, retention, preferences          |
-| `*`                  | `NotFoundPage`               | 1     |                                                |
+| Path                 | Page                | Step  | Purpose                                                                                    |
+| -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------ |
+| `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
+| `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
+| `/devices/:deviceId` | `DeviceDetailsPage` | 6     | Identity, history, diagnostics, ports                                                      |
+| `/topology`          | `TopologyPage`      | 8     | Interactive network map                                                                    |
+| `/scans`             | `ScansPage`         | 9     | Scan history                                                                               |
+| `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found / changed                                                                |
+| `/alerts`            | `AlertsPage`        | 10    | Alert inbox with acknowledge                                                               |
+| `/reports`           | `ReportsPage`       | 11    | Export inventory and scan results                                                          |
+| `/settings`          | `SettingsPage`      | later | Scan schedule, retention, preferences                                                      |
+| `*`                  | `NotFoundPage`      | 1     |                                                                                            |
 
 ### 8.2 Layout and dashboard (target)
 
@@ -523,18 +554,20 @@ defaults for later steps are proposals, finalized in their step.
 | `node-pg-migrate` _(Step 2)_                               | server       | Versioned plain-SQL migrations with locking and up/down support.               |
 | `fast-xml-parser` _(Step 3)_                               | server       | Parses nmap's XML output (no native code).                                     |
 | `oui-data` _(Step 3)_                                      | server       | Bundled IEEE OUI registry for MAC → vendor lookup, offline.                    |
+| `zustand` _(Step 4)_                                       | client       | Shared client state (device inventory, health, UI preferences).                |
+| `motion` _(Step 4)_                                        | client       | Page, list, and indicator animations (formerly Framer Motion).                 |
+| `sonner` _(Step 4)_                                        | client       | Toast notifications for discovery results and errors.                          |
+| `@fontsource-variable/geist-mono` _(Step 4)_               | client       | Self-hosted monospace font for IPs and MACs.                                   |
+| `vitest`, `jsdom` (29), `@testing-library/*` _(Step 4)_    | client (dev) | Component and store tests. jsdom 29 is the newest that supports Node 22.13.    |
 
 ### Added in later steps
 
-| Package / tool                    | Step             | Why                                                                             |
-| --------------------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `zustand`                         | 4                | Shared client state (entity stores, UI preferences).                            |
-| `motion`                          | 4                | Animations and layout transitions.                                              |
-| `@testing-library/react`, `jsdom` | 4                | Component tests with Vitest.                                                    |
-| `ws`                              | 5                | WebSocket server.                                                               |
-| `express-rate-limit`              | 7                | Throttle scan-triggering endpoints.                                             |
-| `nmap` (system binary)            | 3 (optional) / 7 | Host discovery and TCP connect scans. `brew install nmap` / `apt install nmap`. |
-| `cytoscape`                       | 8                | Graph rendering for the topology view.                                          |
+| Package / tool         | Step             | Why                                                                             |
+| ---------------------- | ---------------- | ------------------------------------------------------------------------------- |
+| `ws`                   | 5                | WebSocket server.                                                               |
+| `express-rate-limit`   | 7                | Throttle scan-triggering endpoints.                                             |
+| `nmap` (system binary) | 3 (optional) / 7 | Host discovery and TCP connect scans. `brew install nmap` / `apt install nmap`. |
+| `cytoscape`            | 8                | Graph rendering for the topology view.                                          |
 
 ## 11. Decision log
 

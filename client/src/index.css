@@ -2,12 +2,17 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-heading: var(--font-sans);
   --font-sans: 'Geist Variable', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-neon-magenta: var(--neon-magenta);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -48,6 +53,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Light tokens are kept for completeness; NetScope renders in the dark theme (index.html). */
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -55,7 +61,7 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.52 0.12 215);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
@@ -64,6 +70,9 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+  --success: oklch(0.6 0.17 150);
+  --warning: oklch(0.7 0.16 70);
+  --neon-magenta: oklch(0.6 0.24 330);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
@@ -83,48 +92,95 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+/*
+ * NetScope visual language: deep blue-black base, translucent glass panels, cyan as the single
+ * primary neon, magenta used sparingly, green = online, amber = warning. Muted text keeps
+ * ≥ 4.5:1 contrast on the background.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --background: oklch(0.145 0.022 262);
+  --foreground: oklch(0.95 0.012 250);
+  --card: oklch(0.21 0.03 262 / 55%);
+  --card-foreground: oklch(0.95 0.012 250);
+  --popover: oklch(0.19 0.028 262 / 96%);
+  --popover-foreground: oklch(0.95 0.012 250);
+  --primary: oklch(0.82 0.14 205);
+  --primary-foreground: oklch(0.17 0.03 255);
+  --secondary: oklch(0.26 0.032 262);
+  --secondary-foreground: oklch(0.92 0.015 250);
+  --muted: oklch(0.24 0.028 262);
+  --muted-foreground: oklch(0.72 0.03 250);
+  --accent: oklch(0.29 0.045 245);
+  --accent-foreground: oklch(0.96 0.01 250);
+  --destructive: oklch(0.7 0.2 18);
+  --success: oklch(0.82 0.19 152);
+  --warning: oklch(0.84 0.15 80);
+  --neon-magenta: oklch(0.72 0.24 330);
+  --border: oklch(0.8 0.05 240 / 12%);
+  --input: oklch(0.8 0.05 240 / 16%);
+  --ring: oklch(0.82 0.14 205 / 70%);
+  --chart-1: oklch(0.82 0.14 205);
+  --chart-2: oklch(0.72 0.24 330);
+  --chart-3: oklch(0.82 0.19 152);
+  --chart-4: oklch(0.84 0.15 80);
+  --chart-5: oklch(0.7 0.2 18);
+  --sidebar: oklch(0.16 0.026 262 / 72%);
+  --sidebar-foreground: oklch(0.9 0.015 250);
+  --sidebar-primary: oklch(0.82 0.14 205);
+  --sidebar-primary-foreground: oklch(0.17 0.03 255);
+  --sidebar-accent: oklch(0.82 0.14 205 / 10%);
+  --sidebar-accent-foreground: oklch(0.95 0.012 250);
+  --sidebar-border: oklch(0.8 0.05 240 / 10%);
+  --sidebar-ring: oklch(0.82 0.14 205 / 70%);
+}
+
+/* Frosted panel used for cards, toolbars, and tables. */
+@utility glass-panel {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(16px) saturate(140%);
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 4%),
+    0 12px 32px -16px oklch(0 0 0 / 70%);
+}
+
+/* Restrained neon edge for the primary action and the active navigation item. */
+@utility glow-primary {
+  box-shadow:
+    0 0 0 1px color-mix(in oklch, var(--primary) 40%, transparent),
+    0 0 20px -6px color-mix(in oklch, var(--primary) 60%, transparent);
+}
+
+@utility text-glow {
+  text-shadow: 0 0 14px color-mix(in oklch, var(--primary) 45%, transparent);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100svh;
+  }
+  .dark body {
+    /* Two soft colour fields and a faint grid; fixed so they do not scroll with content. */
+    background-image:
+      radial-gradient(60rem 40rem at 0% -10%, oklch(0.82 0.14 205 / 9%), transparent 60%),
+      radial-gradient(50rem 36rem at 105% 110%, oklch(0.72 0.24 330 / 7%), transparent 60%),
+      linear-gradient(oklch(1 0 0 / 2.2%) 1px, transparent 1px),
+      linear-gradient(90deg, oklch(1 0 0 / 2.2%) 1px, transparent 1px);
+    background-size:
+      auto,
+      auto,
+      32px 32px,
+      32px 32px;
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 35%, transparent);
   }
 }

@@ -1,113 +1,79 @@
-import { RefreshCw } from 'lucide-react';
-import { Badge } from '@/components/ui/badge';
+import { Database, RefreshCw, Server } from 'lucide-react';
+import { GlassPanel, PanelHeader } from '@/components/common/GlassPanel';
+import { StatusDot } from '@/components/common/StatusDot';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { useApiHealth } from '@/hooks/useApiHealth';
+import { useSystemHealth } from '@/hooks/useSystemHealth';
 import { formatDuration, formatTime } from '@/utils/format';
 
-const WARNING_BADGE_CLASS =
-  'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400';
-
-/**
- * Online: API and database up. Degraded: API answered but a dependency is down.
- * Unreachable: the API itself could not be reached.
- */
-function getBadge(status, data) {
-  if (status === 'loading') return { label: 'Checking…', variant: 'secondary' };
-  if (status === 'error') return { label: 'Unreachable', variant: 'destructive' };
-  if (data?.status === 'ok') return { label: 'Online', variant: 'default' };
-  return { label: 'Degraded', variant: 'outline', className: WARNING_BADGE_CLASS };
-}
-
-function formatDatabaseStatus(database) {
-  if (database?.status !== 'up') return 'Down';
-  return `Up · ${database.latencyMs} ms`;
-}
-
-function DetailRow({ label, children }) {
+function Row({ icon: Icon, label, tone, value }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-1.5 text-sm">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="font-medium tabular-nums">{children}</dd>
+    <div className="flex items-center justify-between gap-4 py-2 text-sm">
+      <span className="inline-flex items-center gap-2 text-muted-foreground">
+        <Icon className="size-4" aria-hidden="true" />
+        {label}
+      </span>
+      <span className="inline-flex items-center gap-2 font-medium">
+        {tone && <StatusDot tone={tone} />}
+        {value}
+      </span>
     </div>
   );
 }
 
-/** Shows whether the browser can reach the API, and whether the API can reach its database. */
+/** API and database health with version and uptime. */
 export function SystemStatusCard() {
-  const { status, data, error, checkedAt, refresh } = useApiHealth();
-  const badge = getBadge(status, data);
-  const isDegraded = data?.status === 'degraded';
+  const { state, data, error, checkedAt, isChecking, refresh } = useSystemHealth();
+  const database = data?.checks?.database;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>API server</CardTitle>
-        <CardDescription>
-          {checkedAt ? `Last checked at ${formatTime(checkedAt)}` : 'Connecting to the API…'}
-        </CardDescription>
-        <CardAction>
-          <Badge variant={badge.variant} className={badge.className} aria-live="polite">
-            {badge.label}
-          </Badge>
-        </CardAction>
-      </CardHeader>
-
-      <CardContent className="space-y-4">
+    <GlassPanel className="flex flex-col">
+      <PanelHeader
+        title="System status"
+        description={checkedAt ? `Checked at ${formatTime(checkedAt)}` : 'Checking…'}
+        actions={
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={refresh}
+            disabled={isChecking}
+            aria-label="Check again"
+          >
+            <RefreshCw className={isChecking ? 'motion-safe:animate-spin' : undefined} />
+          </Button>
+        }
+      />
+      <div className="divide-y divide-border px-5 pb-4">
+        <Row
+          icon={Server}
+          label="API server"
+          tone={state === 'offline' ? 'error' : state === 'checking' ? 'neutral' : 'online'}
+          value={state === 'offline' ? 'Unreachable' : state === 'checking' ? 'Checking' : 'Up'}
+        />
+        <Row
+          icon={Database}
+          label="Database"
+          tone={!database ? 'neutral' : database.status === 'up' ? 'online' : 'warning'}
+          value={
+            !database ? '—' : database.status === 'up' ? `Up · ${database.latencyMs} ms` : 'Down'
+          }
+        />
         {data && (
-          <dl className="divide-y">
-            <DetailRow label="Service">{data.service}</DetailRow>
-            <DetailRow label="Version">{data.version}</DetailRow>
-            <DetailRow label="Environment">{data.environment}</DetailRow>
-            <DetailRow label="Uptime">{formatDuration(data.uptimeSeconds)}</DetailRow>
-            <DetailRow label="Database">{formatDatabaseStatus(data.checks?.database)}</DetailRow>
-          </dl>
+          <p className="pt-3 text-xs text-muted-foreground">
+            v{data.version} · {data.environment} · up {formatDuration(data.uptimeSeconds)}
+          </p>
         )}
-
-        {isDegraded && (
-          <div
-            role="status"
-            className="space-y-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm"
-          >
-            <p className="font-medium text-amber-700 dark:text-amber-400">
-              The API is running, but it cannot reach the database.
-            </p>
-            <p className="text-muted-foreground">
-              Check that PostgreSQL is running and that the server&apos;s DATABASE_URL is correct.
-              The server log shows the exact cause.
-            </p>
-          </div>
-        )}
-
         {error && (
-          <div
-            role="alert"
-            className="space-y-1 rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"
-          >
-            <p className="font-medium text-destructive">{error.message}</p>
-            <p className="text-muted-foreground">
-              Code: <span className="font-mono">{error.code}</span>
-              {error.requestId && (
-                <>
-                  {' · '}Request ID: <span className="font-mono">{error.requestId}</span>
-                </>
-              )}
-            </p>
-          </div>
+          <p role="alert" className="pt-3 text-xs text-destructive">
+            {error.message}
+          </p>
         )}
-
-        <Button variant="outline" size="sm" onClick={refresh} disabled={status === 'loading'}>
-          <RefreshCw className={status === 'loading' ? 'animate-spin' : undefined} />
-          Refresh
-        </Button>
-      </CardContent>
-    </Card>
+        {state === 'degraded' && (
+          <p role="status" className="pt-3 text-xs text-warning">
+            The API cannot reach PostgreSQL. Check that it is running and that DATABASE_URL is
+            correct.
+          </p>
+        )}
+      </div>
+    </GlassPanel>
   );
 }

@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 3 of 12 — safe local device discovery (API only). See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 4 of 12 — device list UI. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -116,8 +116,16 @@ only ever talks to its own origin.
 
 ### 4. Discover devices
 
+Open <http://localhost:5173> and click **Discover network** (top right). The **Dashboard** shows
+headline numbers, the current network, and system health. **Devices** lists every device, with
+search (press `/`), status/type/vendor filters, and sortable columns; filters live in the URL, so
+filtered views can be bookmarked. The layout adapts down to phone width.
+
+From the command line:
+
 ```bash
 curl -s -X POST http://127.0.0.1:4000/api/devices/discover | python3 -m json.tool
+curl -s http://127.0.0.1:4000/api/devices | python3 -m json.tool
 ```
 
 Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
@@ -128,24 +136,24 @@ limitations, and troubleshooting: [docs/DISCOVERY.md](docs/DISCOVERY.md).
 
 Run from the repository root.
 
-| Command                     | What it does                                                   |
-| --------------------------- | -------------------------------------------------------------- |
-| `npm run dev`               | Start API (watch mode) and UI (HMR) together                   |
-| `npm run dev:server`        | API only                                                       |
-| `npm run dev:client`        | UI only                                                        |
-| `npm run build`             | Production build of the UI → `client/dist`                     |
-| `npm start`                 | Start the API without watch mode                               |
-| `npm test`                  | Run all test suites (needs PostgreSQL and `TEST_DATABASE_URL`) |
-| `npm run lint`              | ESLint across workspaces                                       |
-| `npm run format`            | Format everything with Prettier                                |
-| `npm run check`             | Format check + lint + tests + build (run before every commit)  |
-| `npm run db:migrate`        | Apply pending database migrations                              |
-| `npm run db:migrate:down`   | Revert the most recent migration                               |
-| `npm run db:migrate:status` | List applied and pending migrations                            |
-| `npm run db:up`             | Start the PostgreSQL container and wait until it is healthy    |
-| `npm run db:stop`           | Stop the container (data is kept)                              |
-| `npm run db:logs`           | Follow PostgreSQL logs                                         |
-| `npm run db:psql`           | Open psql inside the container                                 |
+| Command                     | What it does                                                            |
+| --------------------------- | ----------------------------------------------------------------------- |
+| `npm run dev`               | Start API (watch mode) and UI (HMR) together                            |
+| `npm run dev:server`        | API only                                                                |
+| `npm run dev:client`        | UI only                                                                 |
+| `npm run build`             | Production build of the UI → `client/dist`                              |
+| `npm start`                 | Start the API without watch mode                                        |
+| `npm test`                  | Server + client tests (server needs PostgreSQL and `TEST_DATABASE_URL`) |
+| `npm run lint`              | ESLint across workspaces                                                |
+| `npm run format`            | Format everything with Prettier                                         |
+| `npm run check`             | Format check + lint + tests + build (run before every commit)           |
+| `npm run db:migrate`        | Apply pending database migrations                                       |
+| `npm run db:migrate:down`   | Revert the most recent migration                                        |
+| `npm run db:migrate:status` | List applied and pending migrations                                     |
+| `npm run db:up`             | Start the PostgreSQL container and wait until it is healthy             |
+| `npm run db:stop`           | Stop the container (data is kept)                                       |
+| `npm run db:logs`           | Follow PostgreSQL logs                                                  |
+| `npm run db:psql`           | Open psql inside the container                                          |
 
 ## Configuration
 
@@ -171,7 +179,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 1. ✅ Architecture and development setup
 2. ✅ PostgreSQL setup
 3. ✅ Device discovery
-4. Device list UI
+4. ✅ Device list UI
 5. Live WebSocket updates
 6. Device details
 7. Safe port scanning

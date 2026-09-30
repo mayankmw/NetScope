@@ -114,6 +114,8 @@ describe('POST /api/devices/discover', () => {
       hostname: 'raspberrypi.lan',
       vendor: 'Raspberry Pi Foundation',
       deviceType: 'computer',
+      displayName: null,
+      isTrusted: false,
       status: 'online',
       latencyMs: 5,
       isGateway: false,

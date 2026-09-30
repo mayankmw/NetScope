@@ -22,3 +22,30 @@ export async function upsertNetwork(db, { cidr, gatewayIp, gatewayMac, interface
   );
   return rows[0];
 }
+
+/**
+ * A network with its most recent completed discovery scan. Without `networkId`, returns the
+ * network seen most recently: the one this machine is on, or was last on.
+ *
+ * @param {Executor} db
+ * @param {{ networkId?: string | null }} [options]
+ */
+export async function findNetwork(db, { networkId = null } = {}) {
+  const { rows } = await db.query(
+    `SELECT n.id, n.name, n.cidr, n.gateway_ip, n.gateway_mac, n.interface_name,
+            n.first_seen_at, n.last_seen_at,
+            s.id AS last_scan_id, s.finished_at AS last_scan_finished_at
+     FROM networks n
+     LEFT JOIN LATERAL (
+       SELECT id, finished_at FROM scans
+       WHERE network_id = n.id AND type = 'discovery' AND status = 'completed'
+       ORDER BY finished_at DESC
+       LIMIT 1
+     ) s ON true
+     WHERE $1::uuid IS NULL OR n.id = $1::uuid
+     ORDER BY n.last_seen_at DESC
+     LIMIT 1`,
+    [networkId],
+  );
+  return rows[0] ?? null;
+}
