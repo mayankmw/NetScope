@@ -5,7 +5,7 @@
 
 ## 1. Role
 
-PostgreSQL (16+) is the **system of record**: networks, the device inventory, every scan that ran,
+PostgreSQL (16+; local development uses the `postgres:17` container in `compose.yaml`) is the **system of record**: networks, the device inventory, every scan that ran,
 what each scan observed, open ports, and alerts. It is not used as a queue or a cache.
 
 ## 2. Conventions

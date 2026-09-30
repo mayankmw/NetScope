@@ -117,7 +117,9 @@ netscope/
 │
 ├── shared/                        (5) @netscope/shared — contracts used by both sides
 │                                  (WebSocket event names, error codes)
+├── docker/postgres/init/          SQL run once when the dev database volume is created
 ├── docs/                          Architecture, API, database, roadmap
+├── compose.yaml                   Local PostgreSQL container (dev only; the server runs on the host)
 ├── .github/workflows/             (12) CI: format, lint, test, build
 ├── package.json                   Workspaces + orchestration scripts
 ├── .editorconfig · .gitignore · .nvmrc · .prettierrc.json · .prettierignore
@@ -469,6 +471,13 @@ defaults for later steps are proposals, finalized in their step.
 | `VITE_WS_PATH`         | 5    | `/ws`                   | WebSocket path, resolved against the page origin                          |
 
 `VITE_*` variables are compiled into the public bundle — never put secrets in them.
+
+### Docker Compose (root `.env`)
+
+| Variable            | Default | Secret | Purpose                                          |
+| ------------------- | ------- | ------ | ------------------------------------------------ |
+| `POSTGRES_PASSWORD` | —       | ✅     | Password of the `netscope` role in the container |
+| `POSTGRES_PORT`     | `5433`  |        | Host port (loopback only)                        |
 
 ## 10. Dependencies
 

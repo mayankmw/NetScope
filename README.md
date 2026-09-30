@@ -61,7 +61,7 @@ Data model: [docs/DATABASE.md](docs/DATABASE.md)
 | Node.js        | ≥ 22.13 (see `.nvmrc`) | Step 1                                                                      |
 | npm            | ≥ 10                   | Step 1                                                                      |
 | macOS or Linux | —                      | Step 1                                                                      |
-| PostgreSQL     | ≥ 16                   | Step 2 — `brew install postgresql@16` / `sudo apt install postgresql`       |
+| Docker         | with Compose v2+       | Step 2 — runs PostgreSQL (or install PostgreSQL ≥ 16 natively instead)      |
 | nmap           | ≥ 7.9                  | Step 7 (optional in Step 3) — `brew install nmap` / `sudo apt install nmap` |
 
 ### 1. Install
@@ -74,25 +74,32 @@ cp server/.env.example server/.env
 cp client/.env.example client/.env
 ```
 
-### 2. Create the databases
-
-Connect as a PostgreSQL superuser (on Homebrew this is usually your macOS user):
+### 2. Start PostgreSQL (Docker)
 
 ```bash
-psql -d postgres
+cp .env.example .env    # set POSTGRES_PASSWORD, e.g. to the output of: openssl rand -hex 24
+npm run db:up           # PostgreSQL 17 on 127.0.0.1:5433, with databases netscope and netscope_test
 ```
+
+Use the same password in `DATABASE_URL` and `TEST_DATABASE_URL` in `server/.env`. The container
+listens on loopback only, and its data lives in the `netscope_postgres-data` volume.
+
+<details>
+<summary>Using a natively installed PostgreSQL instead</summary>
+
+Connect as a superuser: `psql -U postgres -d postgres` (official installer) or `psql -d postgres`
+(Homebrew). Then:
 
 ```sql
 CREATE ROLE netscope WITH LOGIN;
 \password netscope
 CREATE DATABASE netscope OWNER netscope;
 CREATE DATABASE netscope_test OWNER netscope;
-\q
 ```
 
-`\password` prompts for the password, so it never lands in your shell or psql history. Put it
-in `DATABASE_URL` and `TEST_DATABASE_URL` in `server/.env`, percent-encoding special characters
-(`@` → `%40`).
+Point both URLs in `server/.env` at that server's port (usually 5432).
+
+</details>
 
 ### 3. Migrate and run
 
@@ -125,6 +132,10 @@ Run from the repository root.
 | `npm run db:migrate`        | Apply pending database migrations                              |
 | `npm run db:migrate:down`   | Revert the most recent migration                               |
 | `npm run db:migrate:status` | List applied and pending migrations                            |
+| `npm run db:up`             | Start the PostgreSQL container and wait until it is healthy    |
+| `npm run db:stop`           | Stop the container (data is kept)                              |
+| `npm run db:logs`           | Follow PostgreSQL logs                                         |
+| `npm run db:psql`           | Open psql inside the container                                 |
 
 ## Configuration
 

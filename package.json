@@ -26,7 +26,11 @@
     "check": "npm run format:check && npm run lint && npm run test && npm run build",
     "db:migrate": "npm run db:migrate -w server",
     "db:migrate:down": "npm run db:migrate:down -w server",
-    "db:migrate:status": "npm run db:migrate:status -w server"
+    "db:migrate:status": "npm run db:migrate:status -w server",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:stop": "docker compose stop postgres",
+    "db:logs": "docker compose logs -f postgres",
+    "db:psql": "docker compose exec postgres psql -U netscope -d netscope"
   },
   "devDependencies": {
     "concurrently": "^10.0.5",
