@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="/usr/bin/nmap -sn -n -T4 -&#45;max-retries 1 -&#45;host-timeout 5s -oX - 192.168.1.0/29" start="1790775375" version="7.98" xmloutputversion="1.05">
+<verbose level="0"/>
+<debugging level="0"/>
+<host><status state="up" reason="arp-response" reason_ttl="0"/>
+<address addr="192.168.1.1" addrtype="ipv4"/>
+<address addr="A4:83:E7:00:01:01" addrtype="mac" vendor="Apple"/>
+<hostnames>
+</hostnames>
+<times srtt="1843" rttvar="5000" to="100000"/>
+</host>
+<host><status state="up" reason="syn-ack" reason_ttl="0"/>
+<address addr="192.168.1.6" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<times srtt="60" rttvar="5000" to="100000"/>
+</host>
+<host><status state="down" reason="no-response" reason_ttl="0"/>
+<address addr="192.168.1.5" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+</host>
+<runstats><finished time="1790775377" elapsed="1.28" exit="success"/><hosts up="2" down="6" total="8"/>
+</runstats>
+</nmaprun>

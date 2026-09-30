@@ -43,6 +43,12 @@ export async function query(text, params) {
 }
 
 /**
+ * Executor for repository functions outside a transaction. Repositories accept any object with
+ * a `query` method, so the same function works with this or with a transaction's client.
+ */
+export const db = Object.freeze({ query });
+
+/**
  * Runs `work` inside a transaction on a dedicated client. Commits if it resolves, rolls back if
  * it throws. Use the provided client for every statement that belongs to the transaction.
  *

@@ -3,6 +3,7 @@ import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { getMigrationStatus } from './db/migrator.js';
 import { closePool, getDatabaseInfo, query } from './db/pool.js';
+import { cancelActiveDiscovery, recoverInterruptedScans } from './services/discovery.service.js';
 import { logger } from './utils/logger.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
@@ -28,6 +29,15 @@ async function verifyDatabase() {
     const { pending } = await getMigrationStatus(query);
     if (pending.length > 0) {
       logger.warn({ pending }, 'Database schema is out of date. Run: npm run db:migrate');
+      return;
+    }
+
+    const interrupted = await recoverInterruptedScans();
+    if (interrupted.length > 0) {
+      logger.warn(
+        { scanIds: interrupted },
+        'Marked scans left running by a previous process as failed',
+      );
     }
   } catch (error) {
     logger.error(
@@ -74,8 +84,10 @@ function shutdown(signal) {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Order matters: stop accepting requests and let in-flight ones finish (they may still need
-  // the database), then close the pool. Later steps add: WebSocket clients (5), scans (3/7).
+  // Order matters: cancel a running discovery (its request then finishes quickly), stop
+  // accepting requests and let in-flight ones finish (they may still need the database), then
+  // close the pool. Step 5 adds: close WebSocket clients.
+  cancelActiveDiscovery();
   server.close(async (serverError) => {
     let exitCode = 0;
     if (serverError) {

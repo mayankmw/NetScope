@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 2 — PostgreSQL foundation.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 3 — device discovery.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -96,12 +96,12 @@ netscope/
 │   │   ├── routes/                URL → middleware chain → controller
 │   │   ├── controllers/           HTTP adapters: read validated input, call service, send envelope
 │   │   ├── services/              Business logic and orchestration
-│   │   ├── validators/            (3) zod schemas for params / query / body
-│   │   ├── middleware/            requestId, httpLogger, notFound, errorHandler; validate (3), rateLimit (7)
+│   │   ├── validators/            zod schemas for params / query / body
+│   │   ├── middleware/            requestId, httpLogger, validate, notFound, errorHandler; rateLimit (7)
 │   │   ├── errors/                AppError + stable error codes
 │   │   ├── db/                    pool.js, errors.js, migrator.js, migrate.js (CLI), migrations/; repositories/ (3)
-│   │   ├── network/               (3) Discovery + diagnostics (see §5)
-│   │   ├── jobs/                  (3) In-process scan job runner
+│   │   ├── network/               Discovery + diagnostics (see §5, DISCOVERY.md)
+│   │   ├── jobs/                  (5) In-process scan job runner
 │   │   ├── events/                (5) Internal event bus
 │   │   ├── websocket/             (5) wsManager, message schemas
 │   │   ├── utils/                 logger, apiResponse
@@ -204,23 +204,31 @@ _Built in Steps 3 (discovery), 6 (diagnostics), and 7 (port checks)._
 
 ```
 server/src/network/
-├── exec/runCommand.js       The ONLY place child processes are spawned
-├── guards/targetGuard.js    Private-range + local-subnet enforcement
-├── platform/                OS differences behind one interface (darwin.js, linux.js)
-├── interfaces.js            Active interface, IPv4 CIDR, default gateway
-├── tools/                   One adapter per binary: build argv → runCommand → raw output
-│   ├── arp.js
-│   ├── ping.js
-│   └── nmap.js
+├── index.js                 Public surface used by services (and replaced in tests)
+├── errors.js                NetworkError + codes (no HTTP knowledge)
+├── ip.js · mac.js           Pure IPv4/CIDR and MAC helpers
+├── guards.js                Private-range, local-subnet, and sweep-size enforcement
+├── networkDetection.js      Default route → interface → subnet → gateway IP + MAC
+├── exec/
+│   ├── tools.js             Allowlist: arp, ping, route, nmap → absolute paths
+│   └── runCommand.js        The ONLY place child processes are spawned
+├── platform/                OS differences behind one interface
+│   ├── darwin.js            route / arp / BSD ping
+│   └── linux.js             /proc/net/route, /proc/net/arp, iputils ping
 ├── parsers/                 Pure functions: raw output → objects (fixture-tested)
-│   ├── arp.parser.js
-│   ├── ping.parser.js
-│   └── nmap.parser.js       (parses nmap XML output, -oX -)
-├── discovery/
-│   ├── discoveryEngine.js   Runs providers, merges results by MAC (fallback IP)
-│   └── providers/           arpCache, pingSweep, nmapHostDiscovery
-└── vendors/ouiLookup.js     MAC prefix → manufacturer (bundled dataset, no network calls)
+│   ├── arp.parser.js · route.parser.js · ping.parser.js
+│   └── nmap.parser.js       nmap XML (-oX -)
+└── discovery/
+    ├── pingSweep.js         Bounded-concurrency echo sweep
+    ├── nmapDiscovery.js     Fixed `nmap -sn` profile (optional)
+    ├── hostnames.js         Reverse DNS (c-ares, timeouts, sanitized)
+    ├── vendors.js           MAC → manufacturer from the bundled IEEE registry
+    ├── classifyDevice.js    Conservative device-type guess
+    └── normalizeDevices.js  Merge by IP, identify by MAC, dedupe → common Device shape
 ```
+
+Orchestration and persistence live in `services/discovery.service.js` and
+`db/repositories/`. The full flow, commands, and failure handling: [DISCOVERY.md](DISCOVERY.md).
 
 ### 5.2 Discovery strategy
 
@@ -258,9 +266,11 @@ These rules are non-negotiable.
 
 ### 5.4 Long-running work: the job runner
 
-_Built in Step 3._
+_Built in Step 5._ Until then, `POST /api/devices/discover` runs synchronously within the request,
+bounded by `SCAN_TIMEOUT_MS`. It already records a `scans` row, enforces one active scan, and
+supports cancellation, so moving it onto the runner changes only how the result is delivered.
 
-Scans take seconds to minutes, so they never block an HTTP request:
+Scans take seconds to minutes, so from Step 5 they no longer block an HTTP request:
 
 ```
 POST /api/scans ──▶ scans.service ──▶ jobs.enqueue(scan) ──▶ 202 Accepted { scan: { id, status: "queued" } }
@@ -446,12 +456,13 @@ defaults for later steps are proposals, finalized in their step.
 | `DATABASE_STATEMENT_TIMEOUT_MS`  | 2    | `15000`                 |        | Server-side limit per SQL statement                                     |
 | `TEST_DATABASE_URL`              | 2    | — (tests only)          | ✅     | Database for `npm test`; name must end in `_test`                       |
 | `SCAN_INTERFACE`                 | 3    | auto-detect             |        | Interface to monitor (`en0`, `eth0`)                                    |
-| `SCAN_TIMEOUT_MS`                | 3    | `120000`                |        | Hard limit per scan job                                                 |
+| `SCAN_TIMEOUT_MS`                | 3    | `60000`                 |        | Hard limit per discovery run                                            |
 | `PING_TIMEOUT_MS`                | 3    | `1000`                  |        | Per-host ping timeout                                                   |
 | `PING_CONCURRENCY`               | 3    | `64`                    |        | Parallel pings during a sweep                                           |
+| `NMAP_DISCOVERY`                 | 3    | `auto`                  |        | `auto`: use nmap host discovery when installed; `off`: never            |
+| `NMAP_PATH`                      | 3    | standard locations      |        | Absolute nmap path if installed elsewhere (must end in `/nmap`)         |
 | `WS_PATH`                        | 5    | `/ws`                   |        | WebSocket endpoint                                                      |
 | `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping interval for dead-connection detection                             |
-| `NMAP_PATH`                      | 7    | `nmap` from `PATH`      |        | nmap binary                                                             |
 | `PORT_SCAN_PORTS`                | 7    | curated common ports    |        | Allowed port list (validated, hard-capped)                              |
 | `SCAN_RATE_LIMIT_PER_HOUR`       | 7    | `30`                    |        | Scan requests per client per hour                                       |
 | `SCAN_SCHEDULE_MINUTES`          | 9    | `0` (off)               |        | Periodic discovery interval                                             |
@@ -510,6 +521,8 @@ defaults for later steps are proposals, finalized in their step.
 | `@types/react`, `@types/react-dom`                         | client (dev) | Editor IntelliSense in JavaScript files (no TypeScript compile).               |
 | `pg` _(Step 2)_                                            | server       | PostgreSQL driver with connection pooling.                                     |
 | `node-pg-migrate` _(Step 2)_                               | server       | Versioned plain-SQL migrations with locking and up/down support.               |
+| `fast-xml-parser` _(Step 3)_                               | server       | Parses nmap's XML output (no native code).                                     |
+| `oui-data` _(Step 3)_                                      | server       | Bundled IEEE OUI registry for MAC → vendor lookup, offline.                    |
 
 ### Added in later steps
 

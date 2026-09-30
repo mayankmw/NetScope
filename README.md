@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 2 of 12 — PostgreSQL and backend foundation. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 3 of 12 — safe local device discovery (API only). See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -50,7 +50,7 @@ Browser (React SPA) ──REST /api──▶ Express API ──▶ services ─�
 ```
 
 Full design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · API contract: [docs/API.md](docs/API.md) ·
-Data model: [docs/DATABASE.md](docs/DATABASE.md)
+Data model: [docs/DATABASE.md](docs/DATABASE.md) · Discovery: [docs/DISCOVERY.md](docs/DISCOVERY.md)
 
 ## Getting started
 
@@ -114,6 +114,16 @@ npm run dev
 The UI calls the API through the Vite dev proxy (`/api` → `DEV_API_PROXY_TARGET`), so the browser
 only ever talks to its own origin.
 
+### 4. Discover devices
+
+```bash
+curl -s -X POST http://127.0.0.1:4000/api/devices/discover | python3 -m json.tool
+```
+
+Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
+discovery if nmap is installed. No root needed. Supported on macOS and Linux. Details,
+limitations, and troubleshooting: [docs/DISCOVERY.md](docs/DISCOVERY.md).
+
 ## Scripts
 
 Run from the repository root.
@@ -160,7 +170,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 
 1. ✅ Architecture and development setup
 2. ✅ PostgreSQL setup
-3. Device discovery
+3. ✅ Device discovery
 4. Device list UI
 5. Live WebSocket updates
 6. Device details

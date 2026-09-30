@@ -14,9 +14,13 @@ const postgresUrl = z
 const milliseconds = (min, max, fallback) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
 
+/** Optional variable where an empty value (`NAME=`) means "not set". */
+const optional = (schema) =>
+  z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
+
 /**
  * Environment variables the server reads. Later steps extend this schema
- * (WS_*, SCAN_*, ...) — see docs/ARCHITECTURE.md#9-environment-variables.
+ * (WS_*, ...) — see docs/ARCHITECTURE.md#9-environment-variables.
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -38,6 +42,18 @@ export const envSchema = z.object({
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(100).default(10),
   DATABASE_CONNECTION_TIMEOUT_MS: milliseconds(100, 60_000, 5_000),
   DATABASE_STATEMENT_TIMEOUT_MS: milliseconds(100, 600_000, 15_000),
+
+  // Discovery. Only operator-set values: nothing here is ever taken from API requests.
+  SCAN_INTERFACE: optional(
+    z.string().regex(/^[A-Za-z0-9._-]{1,32}$/, 'must be an interface name such as en0 or eth0'),
+  ),
+  SCAN_TIMEOUT_MS: milliseconds(5_000, 300_000, 60_000),
+  PING_TIMEOUT_MS: milliseconds(200, 5_000, 1_000),
+  PING_CONCURRENCY: z.coerce.number().int().min(1).max(128).default(64),
+  NMAP_DISCOVERY: z.enum(['auto', 'off']).default('auto'),
+  NMAP_PATH: optional(
+    z.string().regex(/^\/[^\0]*\/nmap$/, 'must be an absolute path ending in /nmap'),
+  ),
 });
 
 /**
@@ -99,6 +115,16 @@ export function parseEnv(env, appInfo) {
       poolMax: vars.DATABASE_POOL_MAX,
       connectionTimeoutMs: vars.DATABASE_CONNECTION_TIMEOUT_MS,
       statementTimeoutMs: vars.DATABASE_STATEMENT_TIMEOUT_MS,
+    },
+    scan: {
+      interfaceName: vars.SCAN_INTERFACE ?? null,
+      timeoutMs: vars.SCAN_TIMEOUT_MS,
+      pingTimeoutMs: vars.PING_TIMEOUT_MS,
+      pingConcurrency: vars.PING_CONCURRENCY,
+      nmap: {
+        mode: vars.NMAP_DISCOVERY,
+        path: vars.NMAP_PATH ?? null,
+      },
     },
   };
 }
