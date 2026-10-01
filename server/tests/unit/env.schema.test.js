@@ -42,6 +42,26 @@ describe('parseEnv', () => {
     expect(config.database.target.port).toBe(5432);
   });
 
+  it('enables conservative port scanning and scan rate limits by default', () => {
+    const config = parseEnv({ DATABASE_URL }, appInfo);
+
+    expect(config.portScan).toEqual({
+      enabled: true,
+      timeoutMs: 120_000,
+      serviceDetection: 'light',
+    });
+    expect(config.scan.rateLimit).toEqual({ limit: 20, windowMs: 600_000 });
+  });
+
+  it('lets the operator turn port scanning and version detection off', () => {
+    const config = parseEnv(
+      { DATABASE_URL, PORT_SCAN_ENABLED: 'false', PORT_SCAN_SERVICE_DETECTION: 'off' },
+      appInfo,
+    );
+
+    expect(config.portScan).toMatchObject({ enabled: false, serviceDetection: 'off' });
+  });
+
   it('requires DATABASE_URL', () => {
     expect(() => parseEnv({}, appInfo)).toThrow('DATABASE_URL: is required');
   });
@@ -57,6 +77,10 @@ describe('parseEnv', () => {
     [{ DATABASE_URL: 'postgres://u:p@localhost' }, 'DATABASE_URL'],
     [{ DATABASE_POOL_MAX: '0' }, 'DATABASE_POOL_MAX'],
     [{ DATABASE_STATEMENT_TIMEOUT_MS: 'soon' }, 'DATABASE_STATEMENT_TIMEOUT_MS'],
+    [{ PORT_SCAN_ENABLED: 'maybe' }, 'PORT_SCAN_ENABLED'],
+    [{ PORT_SCAN_SERVICE_DETECTION: 'aggressive' }, 'PORT_SCAN_SERVICE_DETECTION'],
+    [{ PORT_SCAN_TIMEOUT_MS: '1000' }, 'PORT_SCAN_TIMEOUT_MS'],
+    [{ SCAN_RATE_LIMIT_MAX: '0' }, 'SCAN_RATE_LIMIT_MAX'],
   ])('rejects invalid input %o', (overrides, variable) => {
     expect(() => parseEnv({ DATABASE_URL, ...overrides }, appInfo)).toThrow(variable);
   });

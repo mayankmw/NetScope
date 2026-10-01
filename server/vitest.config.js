@@ -20,6 +20,8 @@ export default defineConfig({
     env: {
       NODE_ENV: 'test',
       LOG_LEVEL: 'silent',
+      // Rate limiting has its own tests; other suites start many scans.
+      SCAN_RATE_LIMIT_MAX: '10000',
       DATABASE_URL: process.env.TEST_DATABASE_URL ?? '',
     },
   },

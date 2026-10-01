@@ -1,6 +1,7 @@
 # NetScope Database
 
-> Status: **Step 6.** Initial schema (Step 2) plus the device timeline (`device_events`, Step 6).
+> Status: **Step 7.** Initial schema (Step 2), the device timeline (`device_events`, Step 6), and
+> port scan details (Step 7).
 > Source of truth: [`server/src/db/migrations/`](../server/src/db/migrations/).
 
 ## 1. Role
@@ -69,8 +70,8 @@ would need nullable columns or untyped JSON, so each scan type writes to its own
 | `scans`               | One row per scan run (`discovery` or `port`)                     | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device |
 | `device_observations` | Discovery results: device seen by a scan, with its IP then       | Unique `(scan_id, device_id)`                                                                     |
 | `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)   | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history       |
-| `device_ports`        | TCP ports ever found open on a device                            | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                      |
-| `port_scan_results`   | Port results: state of a known port in one scan                  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                              |
+| `device_ports`        | TCP ports ever found open on a device, latest service/version    | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                      |
+| `port_scan_results`   | Port results: state (and service/version) of a port in one scan  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                              |
 | `alerts`              | Notable changes (new device, offline, IP changed, new open port) | Type/severity checks; SET NULL on device/scan delete to keep history                              |
 
 ### Indexes
@@ -142,6 +143,19 @@ The migration that created the table back-filled it from existing data: `discove
 device's `first_seen_at`, `online`/`offline` from which completed discoveries saw the device, and
 `updated` from consecutive observations at different IPs. Hostname, vendor, and type changes
 before Step 6 were not recorded.
+
+### Port scans (Step 7)
+
+A port scan is a `scans` row (`type = 'port'`, `target_device_id`, `target` = the device's IP).
+`params` keeps the profile, settings, and the exact nmap arguments; `summary` (added in Step 7)
+keeps the outcome counts (`portsChecked`, `open`, `closed`, `filtered`, `openPorts`, `newlyOpen`,
+`noLongerOpen`).
+
+- Every open port is upserted into `device_ports` (first/last time seen open; latest
+  `service_name`, `service_product`, `service_version`).
+- `port_scan_results` gets one row per open port, with what that scan identified, plus one row
+  per port that was open before and is not now (its `closed` / `filtered` state). Closed ports
+  that were never open are only counted in `summary`.
 
 ## 5. Migrations
 

@@ -49,3 +49,18 @@ export async function findNetwork(db, { networkId = null } = {}) {
   );
   return rows[0] ?? null;
 }
+
+/**
+ * The recorded network with this identity (gateway MAC + subnet), or null if discovery has never
+ * seen it.
+ *
+ * @param {Executor} db
+ * @param {{ gatewayMac: string, cidr: string }} identity
+ */
+export async function findNetworkByIdentity(db, { gatewayMac, cidr }) {
+  const { rows } = await db.query(
+    'SELECT id, cidr, gateway_ip, gateway_mac FROM networks WHERE gateway_mac = $1 AND cidr = $2',
+    [gatewayMac, cidr],
+  );
+  return rows[0] ?? null;
+}

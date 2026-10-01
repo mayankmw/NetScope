@@ -162,3 +162,99 @@ export function makeTimeline() {
     makeDeviceEvent({ id: '1' }),
   ];
 }
+
+const PROFILE_PORTS = [
+  21, 22, 23, 25, 53, 80, 81, 88, 110, 111, 135, 139, 143, 389, 443, 445, 465, 515, 548, 554, 587,
+  631, 636, 873, 993, 995, 1080, 1433, 1883, 1900, 2049, 3000, 3128, 3306, 3389, 5000, 5001, 5060,
+  5357, 5432, 5900, 5985, 5986, 6379, 7000, 8000, 8008, 8009, 8080, 8081, 8123, 8443, 8883, 8888,
+  9000, 9100, 9200, 9443, 10000, 27017, 32400, 49152, 62078,
+];
+
+export function makePortScan(overrides = {}) {
+  return {
+    id: 'port-scan-1',
+    status: 'completed',
+    triggeredBy: 'manual',
+    ipAddress: '192.168.1.21',
+    startedAt: new Date(Date.now() - 2 * 60_000).toISOString(),
+    finishedAt: new Date(Date.now() - 2 * 60_000 + 7_000).toISOString(),
+    durationMs: 7_000,
+    error: null,
+    summary: null,
+    ...overrides,
+  };
+}
+
+/** Shaped like GET /api/devices/:deviceId/ports. Default: never scanned. */
+export function makeDevicePorts({ scan = null, results = null, profile = {} } = {}) {
+  return {
+    profile: {
+      name: 'common',
+      protocol: 'tcp',
+      ports: PROFILE_PORTS,
+      serviceDetection: 'light',
+      timeoutMs: 120_000,
+      enabled: true,
+      ...profile,
+    },
+    scan,
+    results,
+  };
+}
+
+/** A completed scan that found SSH (new) and HTTP open, and a port no longer open. */
+export function makeScannedPorts() {
+  const scan = makePortScan();
+  return makeDevicePorts({
+    scan,
+    results: {
+      scanId: scan.id,
+      startedAt: scan.startedAt,
+      finishedAt: scan.finishedAt,
+      summary: {
+        portsChecked: 63,
+        open: 2,
+        closed: 61,
+        filtered: 0,
+        openPorts: [22, 80],
+        newlyOpen: [22],
+        noLongerOpen: [8080],
+      },
+      ports: [
+        {
+          port: 22,
+          protocol: 'tcp',
+          state: 'open',
+          service: 'ssh',
+          product: 'OpenSSH',
+          version: '9.2p1',
+          firstSeenOpenAt: scan.finishedAt,
+          lastSeenOpenAt: scan.finishedAt,
+          isNew: true,
+        },
+        {
+          port: 80,
+          protocol: 'tcp',
+          state: 'open',
+          service: 'http',
+          product: 'nginx',
+          version: '1.27.5',
+          firstSeenOpenAt: new Date(Date.now() - 48 * HOUR).toISOString(),
+          lastSeenOpenAt: scan.finishedAt,
+          isNew: false,
+        },
+        {
+          port: 8080,
+          protocol: 'tcp',
+          state: 'closed',
+          service: 'http-proxy',
+          product: null,
+          version: null,
+          firstSeenOpenAt: new Date(Date.now() - 48 * HOUR).toISOString(),
+          lastSeenOpenAt: new Date(Date.now() - 24 * HOUR).toISOString(),
+          isNew: false,
+        },
+      ],
+    },
+  });
+}

@@ -7,12 +7,16 @@ import { ApiError } from '@/services/apiClient';
 import * as deviceService from '@/services/deviceService';
 import { resetDeviceDetailsStore } from '@/stores/useDeviceDetailsStore';
 import { resetDeviceStore } from '@/stores/useDeviceStore';
+import { resetPortScanStore, usePortScanStore } from '@/stores/usePortScanStore';
 import {
   DEVICE_ID,
   makeDeviceDetails,
   makeDevice,
+  makeDevicePorts,
   makeInventory,
   makeObservation,
+  makePortScan,
+  makeScannedPorts,
   makeTimeline,
 } from '@/test/fixtures';
 import { DeviceDetailsPage } from './DeviceDetailsPage';
@@ -24,6 +28,8 @@ vi.mock('@/services/deviceService', () => ({
   getDevice: vi.fn(),
   listDeviceEvents: vi.fn(),
   listDeviceObservations: vi.fn(),
+  getDevicePorts: vi.fn(),
+  startPortScan: vi.fn(),
 }));
 
 function renderAt(url) {
@@ -48,7 +54,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetDeviceStore();
   resetDeviceDetailsStore();
+  resetPortScanStore();
   deviceService.getDevice.mockResolvedValue(makeDeviceDetails());
+  deviceService.getDevicePorts.mockResolvedValue(makeDevicePorts());
   deviceService.listDeviceEvents.mockResolvedValue({ items: makeTimeline(), nextCursor: null });
   deviceService.listDeviceObservations.mockResolvedValue({
     items: [makeObservation({ id: '2' })],
@@ -223,5 +231,123 @@ describe('from the device list', () => {
     await user.keyboard('{Enter}');
 
     expect(router.state.location.pathname).toBe('/devices/device-192.168.1.20');
+  });
+});
+
+describe('open ports panel', () => {
+  const portsPanel = () => screen.getByRole('region', { name: 'Open ports' });
+  const renderDevice = async () => {
+    renderAt(`/devices/${DEVICE_ID}`);
+    await screen.findByRole('heading', { level: 1, name: 'raspberrypi.lan' });
+  };
+
+  it('is ready to scan a device that was never scanned', async () => {
+    await renderDevice();
+
+    const panel = portsPanel();
+    expect(
+      await within(panel).findByText(/Find out which of 63 common TCP ports/),
+    ).toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Scan ports' })).toBeEnabled();
+  });
+
+  it('starts a scan, shows it running, then shows what it found', async () => {
+    const user = userEvent.setup();
+    const running = makePortScan({
+      id: 'scan-2',
+      status: 'running',
+      finishedAt: null,
+      durationMs: null,
+    });
+    deviceService.startPortScan.mockResolvedValue({ scan: running });
+    await renderDevice();
+
+    await user.click(await within(portsPanel()).findByRole('button', { name: 'Scan ports' }));
+
+    expect(deviceService.startPortScan).toHaveBeenCalledWith(DEVICE_ID);
+    expect(await within(portsPanel()).findByText(/Checking 63 ports on/)).toBeInTheDocument();
+    expect(within(portsPanel()).getByRole('button', { name: /scanning/i })).toBeDisabled();
+
+    // The server announces the end; the panel reloads the results.
+    deviceService.getDevicePorts.mockResolvedValue(makeScannedPorts());
+    usePortScanStore.getState().applyEvent({
+      type: 'portscan.completed',
+      data: { scanId: 'scan-2', deviceId: DEVICE_ID, summary: {} },
+    });
+
+    const openPorts = await within(portsPanel()).findByRole('list', { name: 'Open ports' });
+    expect(
+      within(openPorts)
+        .getAllByRole('listitem')
+        .map((row) => row.textContent),
+    ).toEqual([
+      expect.stringMatching(/22\/tcp.*ssh.*OpenSSH 9\.2p1.*New/),
+      expect.stringMatching(/80\/tcp.*http.*nginx 1\.27\.5/),
+    ]);
+    expect(within(portsPanel()).getByText(/61 closed/)).toBeInTheDocument();
+    expect(
+      within(portsPanel()).getByRole('list', { name: 'Previously open ports' }),
+    ).toHaveTextContent(/8080\/tcp.*Now closed/);
+    expect(within(portsPanel()).getByRole('button', { name: 'Scan again' })).toBeEnabled();
+  });
+
+  it('shows why the server refused to start a scan', async () => {
+    const user = userEvent.setup();
+    deviceService.startPortScan.mockRejectedValue(
+      new ApiError('192.168.1.21 now belongs to another device.', {
+        status: 409,
+        code: 'TARGET_CHANGED',
+      }),
+    );
+    await renderDevice();
+
+    await user.click(await within(portsPanel()).findByRole('button', { name: 'Scan ports' }));
+
+    expect(await within(portsPanel()).findByRole('alert')).toHaveTextContent(
+      /Could not start the scan: 192\.168\.1\.21 now belongs to another device\. TARGET_CHANGED/,
+    );
+  });
+
+  it('shows a failed scan next to the earlier results', async () => {
+    const scanned = makeScannedPorts();
+    deviceService.getDevicePorts.mockResolvedValue({
+      ...scanned,
+      scan: makePortScan({
+        id: 'scan-3',
+        status: 'failed',
+        error: { code: 'SCAN_TIMEOUT', message: 'The scan did not finish within 120 s.' },
+      }),
+    });
+
+    await renderDevice();
+
+    expect(await within(portsPanel()).findByRole('alert')).toHaveTextContent(
+      'The last scan failed: The scan did not finish within 120 s. SCAN_TIMEOUT',
+    );
+    expect(within(portsPanel()).getByRole('list', { name: 'Open ports' })).toBeInTheDocument();
+  });
+
+  it('cannot start while another scan runs, or when scanning is turned off', async () => {
+    deviceService.getDevicePorts.mockResolvedValue(
+      makeDevicePorts({ profile: { enabled: false } }),
+    );
+    await renderDevice();
+
+    const button = await within(portsPanel()).findByRole('button', { name: 'Scan ports' });
+    await vi.waitFor(() => expect(button).toBeDisabled());
+    expect(
+      within(portsPanel()).getByText(/Port scanning is turned off on the server/),
+    ).toBeInTheDocument();
+  });
+
+  it('waits for another device to finish scanning', async () => {
+    usePortScanStore.setState({
+      active: { scanId: 'scan-9', deviceId: 'another-device', startedAt: new Date().toISOString() },
+    });
+    await renderDevice();
+
+    const button = await within(portsPanel()).findByRole('button', { name: 'Scan ports' });
+    await vi.waitFor(() => expect(button).toBeDisabled());
+    expect(within(portsPanel()).getByText(/Another device is being scanned/)).toBeInTheDocument();
   });
 });

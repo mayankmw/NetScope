@@ -69,3 +69,23 @@ export function listDeviceEvents(deviceId, options = {}) {
 export function listDeviceObservations(deviceId, options = {}) {
   return historyPage(deviceId, 'observations', options);
 }
+
+/**
+ * Starts a port scan of one device (202: it runs in the background). The server decides
+ * everything about the scan; there is nothing to pass.
+ * @param {string} deviceId
+ * @returns {Promise<{ scan: import('@/types/api').PortScan }>}
+ */
+export function startPortScan(deviceId) {
+  return apiClient.post(`/devices/${encodeURIComponent(deviceId)}/scan`);
+}
+
+/**
+ * The device's ports from its latest completed scan, and the status of its latest scan.
+ * @param {string} deviceId
+ * @param {{ signal?: AbortSignal }} [options]
+ * @returns {Promise<import('@/types/api').DevicePorts>}
+ */
+export function getDevicePorts(deviceId, { signal } = {}) {
+  return apiClient.get(`/devices/${encodeURIComponent(deviceId)}/ports`, { signal });
+}

@@ -12,8 +12,9 @@ import * as network from '../network/index.js';
 import { logger } from '../utils/logger.js';
 import { deriveDeviceEvents, toDeviceEventRecords } from './deviceEvents.js';
 import { toDeviceDto } from './dto.js';
+import { networkErrorToAppError } from './networkErrors.js';
 
-const { NetworkError, NetworkErrorCodes } = network;
+const { NetworkErrorCodes } = network;
 
 const NMAP_MAX_TIMEOUT_MS = 30_000;
 const DNS_TIMEOUT_MS = 1_000;
@@ -23,21 +24,6 @@ const DNS_CONCURRENCY = 16;
 let activeDiscovery = null;
 
 class DiscoveryCancelled extends Error {}
-
-/** Maps network-layer failures to API errors. The messages are written to be client-safe. */
-function toAppError(error) {
-  if (!(error instanceof NetworkError)) return null;
-  const map = {
-    [NetworkErrorCodes.PLATFORM_NOT_SUPPORTED]: [501, ErrorCodes.PLATFORM_NOT_SUPPORTED],
-    [NetworkErrorCodes.TOOL_UNAVAILABLE]: [503, ErrorCodes.TOOL_UNAVAILABLE],
-    [NetworkErrorCodes.NO_DEFAULT_GATEWAY]: [503, ErrorCodes.NETWORK_UNAVAILABLE],
-    [NetworkErrorCodes.NO_USABLE_INTERFACE]: [503, ErrorCodes.NETWORK_UNAVAILABLE],
-    [NetworkErrorCodes.GATEWAY_UNRESOLVED]: [503, ErrorCodes.NETWORK_UNAVAILABLE],
-    [NetworkErrorCodes.TARGET_NOT_ALLOWED]: [422, ErrorCodes.TARGET_NOT_ALLOWED],
-  };
-  const [statusCode, code] = map[error.code] ?? [503, ErrorCodes.DISCOVERY_FAILED];
-  return new AppError(error.message, { statusCode, code, cause: error });
-}
 
 function scanInProgress() {
   return new AppError('A scan is already running. Try again when it finishes.', {
@@ -374,7 +360,10 @@ async function handleFailure({ error, signal, controller, scan, log }) {
       cause: error,
     });
   } else {
-    appError = error instanceof AppError ? error : toAppError(error);
+    appError =
+      error instanceof AppError
+        ? error
+        : networkErrorToAppError(error, ErrorCodes.DISCOVERY_FAILED);
   }
 
   if (scan) {

@@ -37,3 +37,19 @@ export const listDeviceHistorySchemas = {
       .optional(),
   }),
 };
+
+/**
+ * POST /api/devices/:deviceId/scan takes no input besides the id: the target is the device's
+ * known address, and the ports and nmap options are fixed on the server. Any field is rejected.
+ */
+export const startPortScanSchemas = {
+  params: deviceParams,
+  query: z.strictObject({}),
+  body: z.strictObject({}),
+};
+
+/** GET /api/devices/:deviceId/ports */
+export const getDevicePortsSchemas = {
+  params: deviceParams,
+  query: z.strictObject({}),
+};

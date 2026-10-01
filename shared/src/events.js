@@ -25,6 +25,11 @@ export const EventTypes = Object.freeze({
   DEVICE_UPDATED: 'device.updated',
   DEVICE_ONLINE: 'device.online',
   DEVICE_OFFLINE: 'device.offline',
+
+  // Port scans of one device (server → all clients)
+  PORT_SCAN_STARTED: 'portscan.started',
+  PORT_SCAN_COMPLETED: 'portscan.completed',
+  PORT_SCAN_FAILED: 'portscan.failed',
 });
 
 /** Messages a client may send. Anything else is rejected. */

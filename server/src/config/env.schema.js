@@ -58,6 +58,15 @@ export const envSchema = z.object({
   NMAP_PATH: optional(
     z.string().regex(/^\/[^\0]*\/nmap$/, 'must be an absolute path ending in /nmap'),
   ),
+
+  // Port scans of one known device (needs nmap).
+  PORT_SCAN_ENABLED: z.stringbool().default(true),
+  PORT_SCAN_TIMEOUT_MS: milliseconds(15_000, 600_000, 120_000),
+  PORT_SCAN_SERVICE_DETECTION: z.enum(['light', 'off']).default('light'),
+
+  // Requests that start a scan (discovery, port scan), per client and endpoint.
+  SCAN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
+  SCAN_RATE_LIMIT_WINDOW_MS: milliseconds(1_000, 86_400_000, 600_000),
 });
 
 /**
@@ -133,6 +142,15 @@ export function parseEnv(env, appInfo) {
         mode: vars.NMAP_DISCOVERY,
         path: vars.NMAP_PATH ?? null,
       },
+      rateLimit: {
+        limit: vars.SCAN_RATE_LIMIT_MAX,
+        windowMs: vars.SCAN_RATE_LIMIT_WINDOW_MS,
+      },
+    },
+    portScan: {
+      enabled: vars.PORT_SCAN_ENABLED,
+      timeoutMs: vars.PORT_SCAN_TIMEOUT_MS,
+      serviceDetection: vars.PORT_SCAN_SERVICE_DETECTION,
     },
   };
 }

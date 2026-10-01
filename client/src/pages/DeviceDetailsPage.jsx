@@ -9,6 +9,7 @@ import { BackLink, DeviceHeader } from '@/components/device-details/DeviceHeader
 import { DeviceIdentityCard } from '@/components/device-details/DeviceIdentityCard';
 import { DeviceMetadata } from '@/components/device-details/DeviceMetadata';
 import { DeviceNetworkCard } from '@/components/device-details/DeviceNetworkCard';
+import { DevicePorts } from '@/components/device-details/DevicePorts';
 import { DeviceStatus } from '@/components/device-details/DeviceStatus';
 import { Button } from '@/components/ui/button';
 import { useDeviceDetails } from '@/hooks/useDeviceDetails';
@@ -17,11 +18,12 @@ import { useDeviceStore } from '@/stores/useDeviceStore';
 import { backLink } from '@/utils/deviceLinks';
 
 /**
- * One device in detail: status, identity, network, activity, and metadata. Updates live.
+ * One device in detail: status, identity, network, open ports, activity, and metadata. Updates
+ * live.
  *
- * Panels are ordered for reading on a phone (status, identity, network, activity, metadata);
- * on wide screens the column wrappers become two columns (`contents` → `flex`): status,
- * activity, and metadata on the left; identity and network on the right.
+ * Panels are ordered for reading on a phone (status, identity, network, ports, activity,
+ * metadata); on wide screens the column wrappers become two columns (`contents` → `flex`):
+ * status, ports, activity, and metadata on the left; identity and network on the right.
  */
 export function DeviceDetailsPage() {
   const { deviceId } = useParams();
@@ -116,15 +118,16 @@ export function DeviceDetailsPage() {
             highlight={changedAt !== null}
             className="order-1"
           />
+          <DevicePorts device={device} now={now} className="order-4" />
           <DeviceActivity
             events={state.events}
             observations={state.observations}
             now={now}
             onLoadMore={loadMore}
             onRetry={retryHistory}
-            className="order-4"
+            className="order-5"
           />
-          <DeviceMetadata device={device} network={network} className="order-5" />
+          <DeviceMetadata device={device} network={network} className="order-6" />
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-4">
           <DeviceIdentityCard device={device} className="order-2" />

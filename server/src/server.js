@@ -9,6 +9,7 @@ import {
   getActiveDiscovery,
   recoverInterruptedScans,
 } from './services/discovery.service.js';
+import { cancelActivePortScan, getActivePortScan } from './services/portScan.service.js';
 import { logger } from './utils/logger.js';
 import { attachWebSocketServer } from './websocket/wsManager.js';
 
@@ -24,7 +25,10 @@ const realtime = attachWebSocketServer(server, {
   allowedOrigins: config.cors.origins,
   eventBus,
   serverVersion: config.app.version,
-  getConnectionState: () => ({ activeDiscovery: getActiveDiscovery() }),
+  getConnectionState: () => ({
+    activeDiscovery: getActiveDiscovery(),
+    activePortScan: getActivePortScan(),
+  }),
 });
 
 /**
@@ -100,10 +104,12 @@ async function shutdown(signal) {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Order matters: cancel a running discovery (its request then finishes quickly), close
-  // WebSocket clients (1001, so they reconnect when the server is back), stop accepting requests
-  // and let in-flight ones finish (they may still need the database), then close the pool.
+  // Order matters: cancel running scans (a discovery's request then finishes quickly; a port
+  // scan runs in the background and records its cancellation), close WebSocket clients (1001,
+  // so they reconnect when the server is back), stop accepting requests and let in-flight ones
+  // finish (they may still need the database), then close the pool.
   cancelActiveDiscovery();
+  const portScanSettled = cancelActivePortScan();
   try {
     await realtime.close();
     logger.info('WebSocket connections closed');
@@ -118,6 +124,7 @@ async function shutdown(signal) {
     }
 
     try {
+      await portScanSettled;
       await closePool();
       logger.info('Database pool closed');
     } catch (poolError) {

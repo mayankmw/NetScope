@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<?xml-stylesheet href="file:///usr/bin/../share/nmap/nmap.xsl" type="text/xsl"?>
+<!-- Nmap 7.93 scan initiated Thu Oct  1 09:32:33 2026 as: nmap -sT -&#45;unprivileged -Pn -n -p 21,22,23,25,53,80,81,88,110,111,135,139,143,389,443,445,465,515,548,554,587,631,636,873,993,995,1080,1433,1883,1900,2049,3000,3128,3306,3389,5000,5001,5060,5357,5432,5900,5985,5986,6379,7000,8000,8008,8009,8080,8081,8123,8443,8883,8888,9000,9100,9200,9443,10000,27017,32400,49152,62078 -sV -&#45;version-light -T3 -&#45;max-retries 1 -&#45;max-rate 100 -&#45;host-timeout 60s -&#45;noninteractive -oX - 172.30.57.99 -->
+<nmaprun scanner="nmap" args="nmap -sT -&#45;unprivileged -Pn -n -p 21,22,23,25,53,80,81,88,110,111,135,139,143,389,443,445,465,515,548,554,587,631,636,873,993,995,1080,1433,1883,1900,2049,3000,3128,3306,3389,5000,5001,5060,5357,5432,5900,5985,5986,6379,7000,8000,8008,8009,8080,8081,8123,8443,8883,8888,9000,9100,9200,9443,10000,27017,32400,49152,62078 -sV -&#45;version-light -T3 -&#45;max-retries 1 -&#45;max-rate 100 -&#45;host-timeout 60s -&#45;noninteractive -oX - 172.30.57.99" start="1790847153" startstr="Thu Oct  1 09:32:33 2026" version="7.93" xmloutputversion="1.05">
+<scaninfo type="connect" protocol="tcp" numservices="63" services="21-23,25,53,80-81,88,110-111,135,139,143,389,443,445,465,515,548,554,587,631,636,873,993,995,1080,1433,1883,1900,2049,3000,3128,3306,3389,5000-5001,5060,5357,5432,5900,5985-5986,6379,7000,8000,8008-8009,8080-8081,8123,8443,8883,8888,9000,9100,9200,9443,10000,27017,32400,49152,62078"/>
+<verbose level="0"/>
+<debugging level="0"/>
+<host starttime="1790847153" endtime="1790847157"><status state="up" reason="user-set" reason_ttl="0"/>
+<address addr="172.30.57.99" addrtype="ipv4"/>
+<hostnames>
+</hostnames>
+<ports><extraports state="filtered" count="63">
+<extrareasons reason="no-response" count="53" proto="tcp" ports="22,25,53,80-81,88,139,143,389,445,465,515,548,631,636,873,993,995,1080,1433,1883,1900,2049,3000,3128,5000-5001,5060,5357,5432,5900,5985-5986,6379,7000,8000,8008-8009,8080-8081,8123,8443,8883,8888,9000,9100,9200,9443,10000,27017,32400,49152,62078"/>
+<extrareasons reason="host-unreach" count="10" proto="tcp" ports="21,23,110-111,135,443,554,587,3306,3389"/>
+</extraports>
+</ports>
+<times srtt="62195" rttvar="5204" to="100000"/>
+</host>
+<runstats><finished time="1790847157" timestr="Thu Oct  1 09:32:37 2026" summary="Nmap done at Thu Oct  1 09:32:37 2026; 1 IP address (1 host up) scanned in 3.54 seconds" elapsed="3.54" exit="success"/><hosts up="1" down="0" total="1"/>
+</runstats>
+</nmaprun>

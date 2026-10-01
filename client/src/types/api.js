@@ -111,6 +111,52 @@
  */
 
 /**
+ * @typedef {object} PortScan one port scan of a device
+ * @property {string} id
+ * @property {'queued' | 'running' | 'completed' | 'failed' | 'cancelled'} status
+ * @property {'manual' | 'schedule'} triggeredBy
+ * @property {string} ipAddress the address that was scanned
+ * @property {string} startedAt
+ * @property {string | null} finishedAt
+ * @property {number | null} durationMs
+ * @property {{ code: string, message: string } | null} error
+ * @property {PortScanSummary | null} summary
+ */
+
+/**
+ * @typedef {object} PortScanSummary
+ * @property {number} portsChecked
+ * @property {number} open
+ * @property {number} closed
+ * @property {number} filtered no answer (firewalled, or the device is offline)
+ * @property {number[]} openPorts
+ * @property {number[]} newlyOpen open now, never seen open before
+ * @property {number[]} noLongerOpen open in the previous scan, not now
+ */
+
+/**
+ * @typedef {object} DevicePort a port in the latest completed scan
+ * @property {number} port
+ * @property {'tcp'} protocol
+ * @property {'open' | 'closed' | 'filtered'} state
+ * @property {string | null} service e.g. "http", "ssl/http"
+ * @property {string | null} product e.g. "nginx" (version detection)
+ * @property {string | null} version e.g. "1.27.5"
+ * @property {string} firstSeenOpenAt
+ * @property {string} lastSeenOpenAt
+ * @property {boolean} isNew first found open by that scan
+ */
+
+/**
+ * @typedef {object} DevicePorts GET /api/devices/:deviceId/ports
+ * @property {{ name: string, protocol: 'tcp', ports: number[], serviceDetection: 'light' | 'off',
+ *              timeoutMs: number, enabled: boolean }} profile what every scan checks
+ * @property {PortScan | null} scan the latest scan, whatever its status
+ * @property {{ scanId: string, startedAt: string, finishedAt: string, summary: PortScanSummary,
+ *              ports: DevicePort[] } | null} results from the latest completed scan
+ */
+
+/**
  * @template T
  * @typedef {object} Page
  * @property {T[]} items

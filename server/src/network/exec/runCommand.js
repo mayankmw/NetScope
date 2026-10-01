@@ -15,7 +15,8 @@ import { resolveTool } from './tools.js';
  */
 
 const MAX_ARGS = 32;
-const MAX_ARG_LENGTH = 256;
+// Long enough for a port list ("21-23,25,53,…"); still far below anything a shell would need.
+const MAX_ARG_LENGTH = 512;
 const DEFAULT_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 const SAFE_ENV = Object.freeze({

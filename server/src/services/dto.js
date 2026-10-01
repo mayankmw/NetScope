@@ -72,3 +72,41 @@ export function toObservationDto(row) {
     triggeredBy: row.triggered_by,
   };
 }
+
+/**
+ * @param {Record<string, any>} row a port `scans` row
+ */
+export function toPortScanDto(row) {
+  const startedAt = row.started_at ? new Date(row.started_at) : null;
+  const finishedAt = row.finished_at ? new Date(row.finished_at) : null;
+  return {
+    id: row.id,
+    status: row.status,
+    triggeredBy: row.triggered_by,
+    ipAddress: row.target,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at ?? null,
+    durationMs: startedAt && finishedAt ? finishedAt - startedAt : null,
+    error: row.error_code ? { code: row.error_code, message: row.error_message } : null,
+    summary: row.summary ?? null,
+  };
+}
+
+/**
+ * @param {Record<string, any>} row a `port_scan_results` row joined with its `device_ports` row
+ * @param {Record<string, any>} scan the scan the result belongs to
+ */
+export function toPortDto(row, scan) {
+  return {
+    port: row.port,
+    protocol: row.protocol,
+    state: row.state,
+    service: row.service_name,
+    product: row.service_product,
+    version: row.service_version,
+    firstSeenOpenAt: row.first_seen_at,
+    lastSeenOpenAt: row.last_seen_at,
+    // First found open by this scan.
+    isNew: new Date(row.first_seen_at) >= new Date(scan.started_at),
+  };
+}

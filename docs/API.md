@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 6.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), and the WebSocket event stream are implemented. Everything else is the plan, and
+> Status: **Step 7.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -62,6 +62,7 @@ Internal details (stack traces, SQL, driver messages, hostnames, credentials) ar
 | 204    | Success, no body                                                         |
 | 400    | Malformed JSON or validation failure                                     |
 | 401    | Not authenticated _(Step 12)_                                            |
+| 403    | Turned off by the server's configuration (e.g. port scanning disabled)   |
 | 404    | Unknown route or resource                                                |
 | 409    | Conflict with current state (e.g. a scan is already running)             |
 | 413    | Body too large                                                           |
@@ -72,26 +73,29 @@ Internal details (stack traces, SQL, driver messages, hostnames, credentials) ar
 
 ## 4. Error codes
 
-| Code                     | Status | Since | Meaning                                            |
-| ------------------------ | ------ | ----- | -------------------------------------------------- |
-| `BAD_REQUEST`            | 4xx    | 1     | Generic client error from the HTTP layer           |
-| `INVALID_JSON`           | 400    | 1     | Body is not valid JSON                             |
-| `VALIDATION_ERROR`       | 400    | 3     | Params, query, or body failed validation           |
-| `NOT_FOUND`              | 404    | 1     | Route or resource does not exist                   |
-| `CONFLICT`               | 409    | 2     | Request conflicts with existing data               |
-| `PAYLOAD_TOO_LARGE`      | 413    | 1     | Body exceeds the limit                             |
-| `INTERNAL_ERROR`         | 500    | 1     | Unexpected failure; see server logs by `requestId` |
-| `DATABASE_UNAVAILABLE`   | 503    | 2     | PostgreSQL unreachable, timed out, or rejecting us |
-| `SCAN_IN_PROGRESS`       | 409    | 3     | Only one scan may run at a time                    |
-| `TARGET_NOT_ALLOWED`     | 422    | 3     | Network is not a private (RFC 1918) network        |
-| `TOOL_UNAVAILABLE`       | 503    | 3     | A required system tool or table cannot be used     |
-| `NETWORK_UNAVAILABLE`    | 503    | 3     | No usable LAN interface or default gateway         |
-| `SCAN_TIMEOUT`           | 503    | 3     | Discovery exceeded `SCAN_TIMEOUT_MS`               |
-| `SCAN_CANCELLED`         | 503    | 3     | Discovery cancelled by server shutdown             |
-| `DISCOVERY_FAILED`       | 503    | 3     | A required network command failed                  |
-| `PLATFORM_NOT_SUPPORTED` | 501    | 3     | Discovery is not available on this OS (Windows)    |
-| `RATE_LIMITED`           | 429    | 7     | Too many scan requests                             |
-| `UNAUTHORIZED`           | 401    | 12    | Authentication required                            |
+| Code                     | Status | Since | Meaning                                                                   |
+| ------------------------ | ------ | ----- | ------------------------------------------------------------------------- |
+| `BAD_REQUEST`            | 4xx    | 1     | Generic client error from the HTTP layer                                  |
+| `INVALID_JSON`           | 400    | 1     | Body is not valid JSON                                                    |
+| `VALIDATION_ERROR`       | 400    | 3     | Params, query, or body failed validation                                  |
+| `NOT_FOUND`              | 404    | 1     | Route or resource does not exist                                          |
+| `CONFLICT`               | 409    | 2     | Request conflicts with existing data                                      |
+| `PAYLOAD_TOO_LARGE`      | 413    | 1     | Body exceeds the limit                                                    |
+| `INTERNAL_ERROR`         | 500    | 1     | Unexpected failure; see server logs by `requestId`                        |
+| `DATABASE_UNAVAILABLE`   | 503    | 2     | PostgreSQL unreachable, timed out, or rejecting us                        |
+| `SCAN_IN_PROGRESS`       | 409    | 3     | Only one scan may run at a time                                           |
+| `TARGET_NOT_ALLOWED`     | 422    | 3     | Network is not a private (RFC 1918) network                               |
+| `TOOL_UNAVAILABLE`       | 503    | 3     | A required system tool (e.g. nmap for port scans) or table cannot be used |
+| `NETWORK_UNAVAILABLE`    | 503    | 3     | No usable LAN interface or default gateway                                |
+| `SCAN_TIMEOUT`           | 503    | 3     | Discovery exceeded `SCAN_TIMEOUT_MS`                                      |
+| `SCAN_CANCELLED`         | 503    | 3     | Discovery cancelled by server shutdown                                    |
+| `DISCOVERY_FAILED`       | 503    | 3     | A required network command failed                                         |
+| `PLATFORM_NOT_SUPPORTED` | 501    | 3     | Discovery is not available on this OS (Windows)                           |
+| `RATE_LIMITED`           | 429    | 7     | Too many scans started; see `Retry-After`                                 |
+| `PORT_SCAN_DISABLED`     | 403    | 7     | `PORT_SCAN_ENABLED=false` on the server                                   |
+| `TARGET_CHANGED`         | 409    | 7     | The device's IP now belongs to another MAC                                |
+| `PORT_SCAN_FAILED`       | 503    | 7     | nmap failed while scanning (reported in the scan)                         |
+| `UNAUTHORIZED`           | 401    | 12    | Authentication required                                                   |
 
 The client adds its own codes when no envelope is available: `NETWORK_ERROR`, `TIMEOUT`,
 `SERVER_UNAVAILABLE` (proxy returned 502/503/504), and `INVALID_RESPONSE`.
@@ -458,6 +462,144 @@ DNS name, and ping time in that scan. Same pagination and errors as `/events`.
 `latencyMs` is `null` when the device did not answer ping in that scan; `hostname` is `null` when
 that scan resolved no name. `triggeredBy` is `manual` or `schedule` (Step 9).
 
+### `POST /api/devices/:deviceId/scan`
+
+Starts a port scan of one known device and returns **202 Accepted** as soon as it is running; the
+scan continues in the background. The request carries the device id only: the target is the
+device's stored address, and the ports and nmap options are fixed on the server
+([PORT_SCANNING.md](PORT_SCANNING.md)). Any query parameter or body field is rejected.
+
+Rate limited (`SCAN_RATE_LIMIT_MAX` scans per `SCAN_RATE_LIMIT_WINDOW_MS`, per client); only
+accepted scans count. Responses carry `RateLimit` and `RateLimit-Policy` headers.
+
+```http
+HTTP/1.1 202 Accepted
+Location: /api/devices/8f2c1d3e-6b7a-4c9d-8e1f-2a3b4c5d6e7f/ports
+RateLimit: "port-scan"; r=19; t=600
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "scan": {
+      "id": "0b7e6c1a-6f0e-4c63-9a55-3c1f0f7f7d10",
+      "status": "running",
+      "triggeredBy": "manual",
+      "ipAddress": "192.168.1.20",
+      "startedAt": "2026-10-01T09:44:55.114Z",
+      "finishedAt": null,
+      "durationMs": null,
+      "error": null,
+      "summary": null
+    }
+  },
+  "error": null
+}
+```
+
+The outcome arrives as `portscan.completed` or `portscan.failed` (§7) and through
+`GET …/ports`.
+
+| Status | Code                  | When                                                                        |
+| ------ | --------------------- | --------------------------------------------------------------------------- |
+| 400    | `VALIDATION_ERROR`    | Malformed `deviceId`, or any query parameter or body field                  |
+| 403    | `PORT_SCAN_DISABLED`  | `PORT_SCAN_ENABLED=false`                                                   |
+| 404    | `NOT_FOUND`           | Unknown device                                                              |
+| 409    | `SCAN_IN_PROGRESS`    | A discovery or a port scan is already running                               |
+| 409    | `TARGET_CHANGED`      | The ARP cache maps the device's IP to a different MAC (`details` has both)  |
+| 422    | `TARGET_NOT_ALLOWED`  | The device is not on the network this computer is on, or not a local target |
+| 429    | `RATE_LIMITED`        | Too many scans started; `Retry-After` and `details.retryAfterSeconds`       |
+| 503    | `TOOL_UNAVAILABLE`    | nmap is not installed                                                       |
+| 503    | `NETWORK_UNAVAILABLE` | No usable network (as for discovery)                                        |
+
+A scan that started and then failed is recorded with one of: `PORT_SCAN_FAILED` (nmap error),
+`SCAN_TIMEOUT` (`PORT_SCAN_TIMEOUT_MS`), `TARGET_CHANGED` (another device answered; results
+discarded), `SCAN_CANCELLED` (server shutdown, status `cancelled`).
+
+### `GET /api/devices/:deviceId/ports`
+
+The device's ports as of its latest **completed** scan, the status of its latest scan of any kind
+(which may be running, or may have failed after an earlier success), and what every scan checks.
+
+```json
+{
+  "success": true,
+  "data": {
+    "profile": {
+      "name": "common",
+      "protocol": "tcp",
+      "ports": [21, 22, 23, 25, 53, 80, "…"],
+      "serviceDetection": "light",
+      "timeoutMs": 120000,
+      "enabled": true
+    },
+    "scan": {
+      "id": "0b7e6c1a-6f0e-4c63-9a55-3c1f0f7f7d10",
+      "status": "completed",
+      "triggeredBy": "manual",
+      "ipAddress": "192.168.1.20",
+      "startedAt": "2026-10-01T09:44:55.114Z",
+      "finishedAt": "2026-10-01T09:45:02.164Z",
+      "durationMs": 7050,
+      "error": null,
+      "summary": { "portsChecked": 63, "open": 2, "closed": 61, "filtered": 0, "…": "…" }
+    },
+    "results": {
+      "scanId": "0b7e6c1a-6f0e-4c63-9a55-3c1f0f7f7d10",
+      "startedAt": "2026-10-01T09:44:55.114Z",
+      "finishedAt": "2026-10-01T09:45:02.164Z",
+      "summary": {
+        "portsChecked": 63,
+        "open": 2,
+        "closed": 61,
+        "filtered": 0,
+        "openPorts": [22, 80],
+        "newlyOpen": [22],
+        "noLongerOpen": [8080]
+      },
+      "ports": [
+        {
+          "port": 22,
+          "protocol": "tcp",
+          "state": "open",
+          "service": "ssh",
+          "product": "OpenSSH",
+          "version": "9.2p1",
+          "firstSeenOpenAt": "2026-10-01T09:45:02.164Z",
+          "lastSeenOpenAt": "2026-10-01T09:45:02.164Z",
+          "isNew": true
+        },
+        {
+          "port": 8080,
+          "protocol": "tcp",
+          "state": "closed",
+          "service": "http-proxy",
+          "product": null,
+          "version": null,
+          "firstSeenOpenAt": "2026-09-28T18:02:11.000Z",
+          "lastSeenOpenAt": "2026-09-30T18:02:11.000Z",
+          "isNew": false
+        }
+      ]
+    }
+  },
+  "error": null
+}
+```
+
+| Field                  | Meaning                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------------------------------ |
+| `scan`                 | Latest scan, any status (`running`, `completed`, `failed`, `cancelled`); `null` if never scanned |
+| `results`              | From the latest completed scan; `null` if none. Stays after a later scan fails.                  |
+| `results.ports`        | Open ports, then ports open before that are now `closed` or `filtered`; by port number           |
+| `isNew`                | First found open by that scan                                                                    |
+| `summary.filtered`     | Ports with no answer (firewalled, or the device is offline)                                      |
+| `summary.noLongerOpen` | Open in the previous completed scan, not in this one                                             |
+| `profile.enabled`      | `false` when the server refuses new scans (`PORT_SCAN_ENABLED=false`)                            |
+
+Errors: `400 VALIDATION_ERROR`, `404 NOT_FOUND`, `503 DATABASE_UNAVAILABLE`.
+
 ## 7. WebSocket
 
 Live events at `ws://<host>:<port>/ws` (`WS_PATH`), on the API's own port. In development the UI
@@ -485,19 +627,22 @@ contract changes. Unknown `type`s must be ignored by clients.
 
 ### Events
 
-| Type                  | When                                                    | `data`                                                                                                                   |
-| --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `system.connected`    | To a client, right after it connects                    | `connectionId`, `serverVersion`, `heartbeatIntervalMs`, `activeDiscovery` (`{ scanId, networkId, startedAt }` or `null`) |
-| `system.heartbeat`    | Every `heartbeatIntervalMs`, to all clients             | `{}`                                                                                                                     |
-| `system.pong`         | Reply to `{"type":"ping"}`                              | `id` (echoed, or `null`)                                                                                                 |
-| `system.error`        | Reply to an invalid client message                      | `code` (`INVALID_MESSAGE`), `message`                                                                                    |
-| `discovery.started`   | A discovery was recorded and is running                 | `scanId`, `networkId`, `sweptRange`, `triggeredBy`, `startedAt`                                                          |
-| `discovery.completed` | A discovery finished and its results are committed      | `scanId`, `networkId`, `sweptRange`, `summary`, `durationMs`, `finishedAt`, `seenDeviceIds`                              |
-| `discovery.failed`    | A started discovery failed, timed out, or was cancelled | `scanId`, `networkId`, `error: { code, message }`                                                                        |
-| `device.discovered`   | A MAC was seen on this network for the first time       | `networkId`, `device`                                                                                                    |
-| `device.updated`      | IP, hostname, vendor, or type changed                   | `networkId`, `device`, `changes` (field names), `previous` (old values)                                                  |
-| `device.online`       | A device that was offline was seen again                | `networkId`, `device`                                                                                                    |
-| `device.offline`      | A device in the swept range was not seen                | `networkId`, `device`                                                                                                    |
+| Type                  | When                                                    | `data`                                                                                                                                                                                              |
+| --------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system.connected`    | To a client, right after it connects                    | `connectionId`, `serverVersion`, `heartbeatIntervalMs`, `activeDiscovery` (`{ scanId, networkId, startedAt }` or `null`), `activePortScan` (`{ scanId, deviceId, networkId, startedAt }` or `null`) |
+| `system.heartbeat`    | Every `heartbeatIntervalMs`, to all clients             | `{}`                                                                                                                                                                                                |
+| `system.pong`         | Reply to `{"type":"ping"}`                              | `id` (echoed, or `null`)                                                                                                                                                                            |
+| `system.error`        | Reply to an invalid client message                      | `code` (`INVALID_MESSAGE`), `message`                                                                                                                                                               |
+| `discovery.started`   | A discovery was recorded and is running                 | `scanId`, `networkId`, `sweptRange`, `triggeredBy`, `startedAt`                                                                                                                                     |
+| `discovery.completed` | A discovery finished and its results are committed      | `scanId`, `networkId`, `sweptRange`, `summary`, `durationMs`, `finishedAt`, `seenDeviceIds`                                                                                                         |
+| `discovery.failed`    | A started discovery failed, timed out, or was cancelled | `scanId`, `networkId`, `error: { code, message }`                                                                                                                                                   |
+| `device.discovered`   | A MAC was seen on this network for the first time       | `networkId`, `device`                                                                                                                                                                               |
+| `device.updated`      | IP, hostname, vendor, or type changed                   | `networkId`, `device`, `changes` (field names), `previous` (old values)                                                                                                                             |
+| `device.online`       | A device that was offline was seen again                | `networkId`, `device`                                                                                                                                                                               |
+| `device.offline`      | A device in the swept range was not seen                | `networkId`, `device`                                                                                                                                                                               |
+| `portscan.started`    | A port scan was recorded and is running                 | `scanId`, `deviceId`, `networkId`, `ipAddress`, `startedAt`, `triggeredBy`                                                                                                                          |
+| `portscan.completed`  | A port scan finished and its results are committed      | `scanId`, `deviceId`, `networkId`, `finishedAt`, `durationMs`, `summary`                                                                                                                            |
+| `portscan.failed`     | A started port scan failed, timed out, or was cancelled | `scanId`, `deviceId`, `networkId`, `error: { code, message }`                                                                                                                                       |
 
 `device` has the same shape as in `GET /api/devices` (including `isGateway` and `updatedAt`).
 A device seen again with no change produces no device event: `discovery.completed.seenDeviceIds`
@@ -563,20 +708,21 @@ reconnect (with backoff), then reload state over REST.
 | `GET /api/devices/:deviceId`                   | 6 ✅  | Device details (implemented, see above)                |
 | `GET /api/devices/:deviceId/events`            | 6 ✅  | Device timeline (implemented, see above)               |
 | `GET /api/devices/:deviceId/observations`      | 6 ✅  | Discovery history (implemented, see above)             |
-| `GET /api/devices/:deviceId/ports`             | 7     | Latest port-check results                              |
+| `POST /api/devices/:deviceId/scan`             | 7 ✅  | Start a port scan (implemented, see above)             |
+| `GET /api/devices/:deviceId/ports`             | 7 ✅  | Port scan status and results (implemented, see above)  |
 | `PATCH /api/devices/:deviceId`                 | later | Edit `displayName`, `notes`, `deviceType`, `isTrusted` |
 | `POST /api/devices/:deviceId/diagnostics/ping` | later | On-demand ping (latency, loss)                         |
 
 ### `/api/scans`
 
-| Method & path                    | Step | Purpose                                                              |
-| -------------------------------- | ---- | -------------------------------------------------------------------- |
-| `POST /api/scans`                | 7    | Start a port scan → 202. Body: `{ "type": "port", "deviceId": "…" }` |
-| `GET /api/scans/:scanId`         | 5, 9 | Scan status and summary                                              |
-| `POST /api/scans/:scanId/cancel` | 5    | Cancel a queued or running scan                                      |
-| `GET /api/scans`                 | 9    | Scan history (paginated)                                             |
+| Method & path                    | Step | Purpose                         |
+| -------------------------------- | ---- | ------------------------------- |
+| `GET /api/scans/:scanId`         | 9    | Scan status and summary         |
+| `POST /api/scans/:scanId/cancel` | 9    | Cancel a queued or running scan |
+| `GET /api/scans`                 | 9    | Scan history (paginated)        |
 
-Discovery stays synchronous; other clients follow it through WebSocket events. Asynchronous (`202`) runs arrive with scheduled scans in Step 9.
+Port scans are started per device (`POST /api/devices/:deviceId/scan`, Step 7, asynchronous
+`202`). Discovery stays synchronous; other clients follow it through WebSocket events.
 
 ### `/api/network`
 

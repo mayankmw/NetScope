@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 6 — device details.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 7 — safe port scanning.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -75,7 +75,8 @@ netscope/
 │   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, DeviceLink, attributes,
 │   │   │   │                      skeleton
 │   │   │   ├── device-details/    DeviceHeader, DeviceStatus, DeviceIdentityCard,
-│   │   │   │                      DeviceNetworkCard, DeviceActivity, DeviceMetadata, skeleton
+│   │   │   │                      DeviceNetworkCard, DevicePorts, DeviceActivity, DeviceMetadata,
+│   │   │   │                      skeleton
 │   │   │   ├── network/           NetworkPanel
 │   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
 │   │   │   ├── topology/          (8) Cytoscape graph wrapper
@@ -83,19 +84,20 @@ netscope/
 │   │   ├── config/                env.js — the only reader of import.meta.env
 │   │   ├── constants/             deviceTypes.js (labels for device_types codes)
 │   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
-│   │   │                          useDeviceDetails, useOpenDevice, useRealtime, useSystemHealth,
+│   │   │                          useDeviceDetails, useDevicePorts, useOpenDevice, useRealtime,
+│   │   │                          useSystemHealth,
 │   │   │                          useMediaQuery, useNow, useKeyboardShortcut
 │   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
 │   │   ├── lib/                   shadcn `cn` helper
 │   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, NotFoundPage,
 │   │   │                          RouteErrorPage
 │   │   ├── services/              apiClient, deviceService, healthService, realtimeClient
-│   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, useConnectionStore,
-│   │   │                          useSystemStore, useUiStore (Zustand)
+│   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, usePortScanStore,
+│   │   │                          useConnectionStore, useSystemStore, useUiStore (Zustand)
 │   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
 │   │   ├── types/                 JSDoc typedefs for API contracts
 │   │   ├── utils/                 deviceFilters (search/filter/sort/URL), deviceActivity (timeline
-│   │   │                          text), deviceLinks, format, ids, ip, mac
+│   │   │                          text), deviceLinks, format, ids, ip, mac, portScan
 │   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
@@ -112,7 +114,7 @@ netscope/
 │   │   ├── controllers/           HTTP adapters: read validated input, call service, send envelope
 │   │   ├── services/              Business logic and orchestration
 │   │   ├── validators/            zod schemas for params / query / body
-│   │   ├── middleware/            requestId, httpLogger, validate, notFound, errorHandler; rateLimit (7)
+│   │   ├── middleware/            requestId, httpLogger, validate, rateLimit, notFound, errorHandler
 │   │   ├── errors/                AppError + stable error codes
 │   │   ├── db/                    pool.js, errors.js, migrator.js, migrate.js (CLI), migrations/; repositories/ (3)
 │   │   ├── network/               Discovery + diagnostics (see §5, DISCOVERY.md)
@@ -213,7 +215,7 @@ Nothing points back.
 
 ## 5. Network layer and safety model
 
-_Built in Steps 3 (discovery), 6 (diagnostics), and 7 (port checks)._
+_Built in Steps 3 (discovery) and 7 (port scans)._
 
 ### 5.1 Structure
 
@@ -222,8 +224,9 @@ server/src/network/
 ├── index.js                 Public surface used by services (and replaced in tests)
 ├── errors.js                NetworkError + codes (no HTTP knowledge)
 ├── ip.js · mac.js           Pure IPv4/CIDR and MAC helpers
-├── guards.js                Private-range, local-subnet, and sweep-size enforcement
+├── guards.js                Private-range, local-subnet, sweep-size, and port-list enforcement
 ├── networkDetection.js      Default route → interface → subnet → gateway IP + MAC
+├── localInterfaces.js       This machine's own interfaces (recognizes the NetScope host)
 ├── exec/
 │   ├── tools.js             Allowlist: arp, ping, route, nmap → absolute paths
 │   └── runCommand.js        The ONLY place child processes are spawned
@@ -232,7 +235,10 @@ server/src/network/
 │   └── linux.js             /proc/net/route, /proc/net/arp, iputils ping
 ├── parsers/                 Pure functions: raw output → objects (fixture-tested)
 │   ├── arp.parser.js · route.parser.js · ping.parser.js
-│   └── nmap.parser.js       nmap XML (-oX -)
+│   └── nmap.parser.js       nmap XML (-oX -): host discovery and port scans
+├── portscan/
+│   ├── portProfile.js       The fixed list of 63 common TCP ports
+│   └── nmapPortScan.js      The fixed `nmap -sT` command line; guards; run + parse
 └── discovery/
     ├── pingSweep.js         Bounded-concurrency echo sweep
     ├── nmapDiscovery.js     Fixed `nmap -sn` profile (optional)
@@ -242,8 +248,9 @@ server/src/network/
     └── normalizeDevices.js  Merge by IP, identify by MAC, dedupe → common Device shape
 ```
 
-Orchestration and persistence live in `services/discovery.service.js` and
-`db/repositories/`. The full flow, commands, and failure handling: [DISCOVERY.md](DISCOVERY.md).
+Orchestration and persistence live in `services/discovery.service.js`,
+`services/portScan.service.js`, and `db/repositories/`. Full flows, commands, and failure
+handling: [DISCOVERY.md](DISCOVERY.md) and [PORT_SCANNING.md](PORT_SCANNING.md).
 
 ### 5.2 Discovery strategy
 
@@ -258,6 +265,11 @@ Orchestration and persistence live in `services/discovery.service.js` and
 
 This works **without root**. Raw-socket techniques (ARP scans, SYN scans) are intentionally not used.
 
+**Port scans (Step 7)** check one known device at a time: its stored IP, which must be on the
+network this machine is on now and still answer for the device's MAC (ARP cache, before and
+after the scan). nmap runs a fixed TCP connect scan of 63 common ports with light service
+detection; nothing about it can be chosen by a request. Details: [PORT_SCANNING.md](PORT_SCANNING.md).
+
 ### 5.3 Safety rules
 
 These rules are non-negotiable.
@@ -268,36 +280,39 @@ These rules are non-negotiable.
 2. **Execution** — `execFile` / `spawn` with argument arrays and `shell: false`. Only allowlisted
    binaries (`arp`, `ping`, `nmap`) are run, with a timeout, an output-size cap, and kill-on-abort. User
    input never becomes a flag — only validated IPs and ports are inserted into argv.
-3. **nmap profile** — allowed: host discovery (`-sn`) and TCP connect scans (`-sT`) over a
-   bounded, validated port list, with a rate cap. **Never**: NSE scripts (`--script`, `-sC`), OS
-   detection (`-O`), aggressive mode (`-A`), raw/SYN scans, or spoofing/decoy/fragmentation/evasion
-   options (`-S`, `-D`, `-f`, `--spoof-mac`, `--data-length`, …).
+3. **nmap profile** — allowed: host discovery (`-sn`) and TCP connect scans (`-sT --unprivileged`)
+   over a fixed port list, with light service detection (`-sV --version-light`) and a rate cap.
+   **Never**: requested NSE scripts (`--script`, `-sC`), OS detection (`-O`), aggressive mode
+   (`-A`), raw/SYN/UDP scans, or spoofing/decoy/fragmentation/evasion options (`-S`, `-D`, `-f`,
+   `--spoof-mac`, `--data-length`, …). The "version" scripts `-sV` loads are inert at light
+   intensity ([PORT_SCANNING.md §3](PORT_SCANNING.md#3-nmap-command-strategy)).
 4. **Privilege** — never run as root or via sudo.
-5. **Load** — one scan at a time (job queue concurrency 1); scan-triggering endpoints are rate
-   limited; every job has a hard timeout.
+5. **Load** — one scan at a time, of any type (a partial unique index on `scans`); endpoints that
+   start scans are rate limited; every scan has a hard timeout and is cancelled on shutdown.
 6. **Exposure** — the API binds to `127.0.0.1` by default and warns loudly otherwise; it must not be
    exposed on the LAN until authentication exists _(Step 12)_.
 7. **Accountability** — every scan is persisted with its type, target, parameters, timestamps, and outcome.
 
-### 5.4 Long-running work: the job runner
+### 5.4 Long-running work
 
-_Built in Step 5._ Until then, `POST /api/devices/discover` runs synchronously within the request,
-bounded by `SCAN_TIMEOUT_MS`. It already records a `scans` row, enforces one active scan, and
-supports cancellation, so moving it onto the runner changes only how the result is delivered.
+Discovery runs within its request, bounded by `SCAN_TIMEOUT_MS`: the tab that starts it gets the
+result directly, other tabs follow through events.
 
-Scans take seconds to minutes, so from Step 5 they no longer block an HTTP request:
+Port scans (Step 7) run in the background, because they take up to minutes and the UI must show
+"scanning" across reloads and tabs:
 
 ```
-POST /api/scans ──▶ scans.service ──▶ jobs.enqueue(scan) ──▶ 202 Accepted { scan: { id, status: "queued" } }
-                                          │
-                        job runner (concurrency 1, timeout, AbortController)
-                                          │
-                  network layer ──▶ repositories ──▶ event bus ──▶ wsManager ──▶ browsers
+POST /api/devices/:id/scan ──▶ portScan.service: validate, record scans row (running)
+        │                         └──▶ background run (AbortController, hard timeout)
+        ▼                                 network layer ──▶ repositories ──▶ event bus ──▶ browsers
+202 Accepted { scan }
 ```
 
-Scan states: `queued → running → completed | failed | cancelled`. The runner is in-process,
-because this is a single-host app with at most one scan at a time. It sits behind a small interface,
-so it could be swapped for a persistent queue if that ever changes.
+Scan states: `queued → running → completed | failed | cancelled`. Runs are in-process: this is a
+single-host app with at most one scan at a time. The database (one active scan, a partial unique
+index) is the authority; an in-process slot refuses a concurrent request immediately. On startup,
+scans left running by a previous process are marked failed; on shutdown, a running scan is
+cancelled and recorded before the database pool closes. Scheduled scans (Step 9) reuse this.
 
 ### 5.5 Platform support
 
@@ -334,8 +349,10 @@ with the job runner and scheduled scans in Step 9.
 
 **Client side.** `services/realtimeClient.js` owns the single connection (backoff, watchdog,
 dedupe) and knows nothing about React. `hooks/useRealtime.js`, mounted once in `AppLayout`,
-routes its status to `useConnectionStore` (top-bar "Live" indicator) and its events to
-`useDeviceStore.applyEvent`. Rows changed by an event get a brief highlight.
+routes its status to `useConnectionStore` (top-bar "Live" indicator) and its events to the
+stores' `applyEvent` (`useDeviceStore`, `useDeviceDetailsStore`, `usePortScanStore`). Rows changed
+by an event get a brief highlight. Port scans (`portscan.*`) run in the background, so the tab that
+started one announces its outcome with a toast.
 
 ## 7. Frontend architecture
 
@@ -359,15 +376,16 @@ Imports use the `@/` alias (`@/services/apiClient`).
 
 ### 7.2 State strategy
 
-| Kind of state                        | Where it lives                                                               |
-| ------------------------------------ | ---------------------------------------------------------------------------- |
-| Ephemeral UI (menu open, input text) | Component `useState`                                                         |
-| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`  |
-| The device on the details page       | `useDeviceDetailsStore`: details, timeline, and discovery history pages      |
-| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)             |
-| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard        |
-| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)       |
-| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable |
+| Kind of state                        | Where it lives                                                                |
+| ------------------------------------ | ----------------------------------------------------------------------------- |
+| Ephemeral UI (menu open, input text) | Component `useState`                                                          |
+| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`   |
+| The device on the details page       | `useDeviceDetailsStore`: details, timeline, and discovery history pages       |
+| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)              |
+| Port scans                           | `usePortScanStore`: the scan running anywhere, and each viewed device's ports |
+| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard         |
+| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)        |
+| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable  |
 
 Data flow: **component → hook → store action → service → apiClient**. Components never call
 services or `fetch`. Stores expose actions (`fetchDevices`, `discoverNetwork`, `checkHealth`);
@@ -386,6 +404,11 @@ selectors to limit re-renders.
   `updatedAt` only) and schedule one background refresh shortly after, which puts new history
   entries on top of the pages already loaded. Leaving the page cancels requests but keeps the
   data, so going back is instant. A malformed id is "not found" without a request.
+
+- `usePortScanStore.active` is the one scan running anywhere (from `portscan.*` events and
+  `system.connected`). It disables "Discover network" and other devices' "Scan ports", matching the
+  server's one-scan rule. A scan's end reloads that device's ports over REST; without a live
+  connection, `useDevicePorts` polls every 3 s while its device is being scanned.
 
 Planned stores: `useScanStore`, `useAlertStore` (Steps 9–10). TanStack Query
 is deliberately not used: most data will arrive by server push into shared entity state, and
@@ -424,7 +447,7 @@ Zustand covers both push and fetch with one model.
 | -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------ |
 | `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
 | `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
-| `/devices/:deviceId` | `DeviceDetailsPage` | 6     | Status, identity, network, activity (timeline, discovery history), metadata; ports (7)     |
+| `/devices/:deviceId` | `DeviceDetailsPage` | 6–7   | Status, identity, network, open ports (scan), activity, metadata                           |
 | `/topology`          | `TopologyPage`      | 8     | Interactive network map                                                                    |
 | `/scans`             | `ScansPage`         | 9     | Scan history                                                                               |
 | `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found / changed                                                                |
@@ -494,8 +517,11 @@ defaults for later steps are proposals, finalized in their step.
 | `NMAP_PATH`                      | 3    | standard locations      |        | Absolute nmap path if installed elsewhere (must end in `/nmap`)         |
 | `WS_PATH`                        | 5    | `/ws`                   |        | WebSocket endpoint                                                      |
 | `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping + `system.heartbeat` interval; unresponsive clients are dropped    |
-| `PORT_SCAN_PORTS`                | 7    | curated common ports    |        | Allowed port list (validated, hard-capped)                              |
-| `SCAN_RATE_LIMIT_PER_HOUR`       | 7    | `30`                    |        | Scan requests per client per hour                                       |
+| `PORT_SCAN_ENABLED`              | 7    | `true`                  |        | `false` refuses every port scan (403); results stay readable            |
+| `PORT_SCAN_TIMEOUT_MS`           | 7    | `120000`                |        | Hard limit per port scan (15000–600000)                                 |
+| `PORT_SCAN_SERVICE_DETECTION`    | 7    | `light`                 |        | `light`: `-sV --version-light`; `off`: TCP connects only                |
+| `SCAN_RATE_LIMIT_MAX`            | 7    | `20`                    |        | Scans a client may start per window (discovery, port scans separately)  |
+| `SCAN_RATE_LIMIT_WINDOW_MS`      | 7    | `600000`                |        | Rate-limit window (10 min)                                              |
 | `SCAN_SCHEDULE_MINUTES`          | 9    | `0` (off)               |        | Periodic discovery interval                                             |
 | `DATA_RETENTION_DAYS`            | 9    | `90`                    |        | Purge observations older than this                                      |
 | `ALERT_OFFLINE_AFTER_MINUTES`    | 10   | `15`                    |        | Absence before a device-offline alert                                   |
@@ -590,3 +616,6 @@ defaults for later steps are proposals, finalized in their step.
 | 15  | Vitest everywhere                              | One runner and API for server and client.                                                                                                                                     | —                                                                        |
 | 16  | Device timeline as a stored event log          | `device_events` is written in the discovery transaction from the same facts as the WebSocket events. Deriving status changes from scans would duplicate offline rules in SQL. | —                                                                        |
 | 17  | Cursor pagination for device histories         | Append-only, newest-first lists that grow while being read: a `before` cursor never skips or repeats entries, unlike page numbers, and needs no `COUNT`.                      | —                                                                        |
+| 18  | Port scans asynchronous (202), discovery not   | A port scan outlives a comfortable request, and its "scanning" state must survive reloads and show in every tab. Discovery's caller wants the result inline.                  | Scheduled scans (Step 9) may move discovery to the same model.           |
+| 19  | Fixed port profile in code, not configurable   | The list is the safety boundary: auditable in one file, identical everywhere, impossible to widen from the API or a misconfigured `.env`.                                     | Users need site-specific ports (then: an allowlisted, capped variable).  |
+| 20  | Verify the target's MAC before and after       | DHCP reuses addresses: scanning a device's last known IP could hit another machine. The ARP cache confirms who answered; mismatched results are discarded.                    | —                                                                        |

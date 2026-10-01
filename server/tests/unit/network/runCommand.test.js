@@ -67,7 +67,7 @@ describe('runCommand', () => {
     ['a non-array', '-an'],
     ['a non-string argument', [42]],
     ['a NUL byte', ['-an\0']],
-    ['an overlong argument', ['x'.repeat(300)]],
+    ['an overlong argument', ['x'.repeat(600)]],
   ])('refuses %s', async (_label, args) => {
     await expect(runCommand('arp', args, { timeoutMs: 1000 })).rejects.toThrow(TypeError);
     expect(execFile).not.toHaveBeenCalled();

@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 6 of 12 — device details. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 7 of 12 — safe port scanning. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -25,7 +25,7 @@ Details: [Architecture §5 — Network layer and safety model](docs/ARCHITECTURE
 - Device discovery with MAC vendor identification
 - Live device list and dashboard (WebSocket updates)
 - Device details: identity, network, presence, activity timeline, and discovery history
-- Safe port checks on a single device
+- Safe port scans of a single known device (fixed TCP connect profile, service detection)
 - Interactive network topology
 - Scan history and device presence timeline
 - New-device and change alerts
@@ -56,13 +56,13 @@ Data model: [docs/DATABASE.md](docs/DATABASE.md) · Discovery: [docs/DISCOVERY.m
 
 ### Prerequisites
 
-| Requirement    | Version                | Needed from                                                                 |
-| -------------- | ---------------------- | --------------------------------------------------------------------------- |
-| Node.js        | ≥ 22.13 (see `.nvmrc`) | Step 1                                                                      |
-| npm            | ≥ 10                   | Step 1                                                                      |
-| macOS or Linux | —                      | Step 1                                                                      |
-| Docker         | with Compose v2+       | Step 2 — runs PostgreSQL (or install PostgreSQL ≥ 16 natively instead)      |
-| nmap           | ≥ 7.9                  | Step 7 (optional in Step 3) — `brew install nmap` / `sudo apt install nmap` |
+| Requirement    | Version                | Needed from                                                                                 |
+| -------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
+| Node.js        | ≥ 22.13 (see `.nvmrc`) | Step 1                                                                                      |
+| npm            | ≥ 10                   | Step 1                                                                                      |
+| macOS or Linux | —                      | Step 1                                                                                      |
+| Docker         | with Compose v2+       | Step 2 — runs PostgreSQL (or install PostgreSQL ≥ 16 natively instead)                      |
+| nmap           | ≥ 7.80                 | Port scans (Step 7); optional for discovery — `brew install nmap` / `sudo apt install nmap` |
 
 ### 1. Install
 
@@ -131,6 +131,13 @@ discovery finds it, identity, network information (current and previous IPs, MAC
 interface it is reached through, ping time), its activity timeline (first seen, offline, back
 online, IP or name changes), and every scan that saw it. It updates live too.
 
+On a device's page, **Scan ports** checks 63 common TCP ports on that device with nmap and lists
+the open ones with the service and version found (e.g. `22/tcp ssh OpenSSH 9.2p1`). The scan runs
+in the background (5–60 s); every open tab shows its progress and result. Only devices on the
+network this computer is on can be scanned, one scan at a time, with a fixed, non-intrusive
+profile: ordinary connections, no login attempts, exploits, or OS fingerprinting. Needs nmap.
+Details: [docs/PORT_SCANNING.md](docs/PORT_SCANNING.md).
+
 From the command line:
 
 ```bash
@@ -138,6 +145,8 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover | python3 -m json.too
 curl -s http://127.0.0.1:4000/api/devices | python3 -m json.tool
 curl -s http://127.0.0.1:4000/api/devices/<deviceId> | python3 -m json.tool
 curl -s "http://127.0.0.1:4000/api/devices/<deviceId>/events?limit=10" | python3 -m json.tool
+curl -s -X POST http://127.0.0.1:4000/api/devices/<deviceId>/scan | python3 -m json.tool   # 202
+curl -s http://127.0.0.1:4000/api/devices/<deviceId>/ports | python3 -m json.tool
 ```
 
 Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
@@ -195,7 +204,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 4. ✅ Device list UI
 5. ✅ Live WebSocket updates
 6. ✅ Device details
-7. Safe port scanning
+7. ✅ Safe port scanning
 8. Network topology visualization
 9. Historical scans
 10. New-device alerts

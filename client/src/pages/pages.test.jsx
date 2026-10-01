@@ -7,6 +7,7 @@ import { ApiError } from '@/services/apiClient';
 import * as deviceService from '@/services/deviceService';
 import * as healthService from '@/services/healthService';
 import { resetDeviceStore } from '@/stores/useDeviceStore';
+import { resetPortScanStore, usePortScanStore } from '@/stores/usePortScanStore';
 import { makeInventory } from '@/test/fixtures';
 import { DashboardPage } from './DashboardPage';
 import { DevicesPage } from './DevicesPage';
@@ -27,6 +28,7 @@ const rows = () => screen.getAllByRole('row').slice(1); // skip the header row
 beforeEach(() => {
   vi.clearAllMocks();
   resetDeviceStore();
+  resetPortScanStore();
   healthService.getHealth.mockResolvedValue({
     status: 'ok',
     service: 'netscope-server',
@@ -70,6 +72,17 @@ describe('DevicesPage', () => {
 
     expect(await screen.findByText('No devices yet')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /discover network/i })).toBeEnabled();
+  });
+
+  it('does not offer discovery while a port scan runs', async () => {
+    deviceService.listDevices.mockResolvedValue({ network: null, devices: [] });
+    usePortScanStore.setState({
+      active: { scanId: 'scan-9', deviceId: 'd1', startedAt: new Date().toISOString() },
+    });
+
+    renderPage(<DevicesPage />);
+
+    expect(await screen.findByRole('button', { name: /discover network/i })).toBeDisabled();
   });
 
   it('lists every device with its details', async () => {

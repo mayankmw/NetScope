@@ -181,6 +181,20 @@
   animation: live-ring 2.5s ease-out 1;
 }
 
+/* Indeterminate progress: a short bar sweeping across its track. */
+@keyframes scan-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+@utility animate-scan-sweep {
+  animation: scan-sweep 1.4s ease-in-out infinite;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
