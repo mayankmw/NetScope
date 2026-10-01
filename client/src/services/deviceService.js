@@ -71,6 +71,18 @@ export function listDeviceObservations(deviceId, options = {}) {
 }
 
 /**
+ * A device's presence over the last `days` days: online / offline periods and which discovery
+ * scans saw it.
+ * @param {string} deviceId
+ * @param {{ days?: number, signal?: AbortSignal }} [options]
+ * @returns {Promise<import('@/types/api').DeviceHistory>}
+ */
+export function getDeviceHistory(deviceId, { days, signal } = {}) {
+  const query = days ? `?days=${encodeURIComponent(days)}` : '';
+  return apiClient.get(`/devices/${encodeURIComponent(deviceId)}/history${query}`, { signal });
+}
+
+/**
  * Starts a port scan of one device (202: it runs in the background). The server decides
  * everything about the scan; there is nothing to pass.
  * @param {string} deviceId

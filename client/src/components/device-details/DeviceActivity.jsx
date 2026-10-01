@@ -16,6 +16,7 @@ import { GlassPanel } from '@/components/common/GlassPanel';
 import { RelativeTime } from '@/components/common/RelativeTime';
 import { SegmentedControl } from '@/components/common/SegmentedControl';
 import { Tag } from '@/components/common/Tag';
+import { ScanLink } from '@/components/scans/ScanLink';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
@@ -180,12 +181,15 @@ function DiscoveryHistory({ items }) {
             key={observation.id}
             className="flex flex-wrap items-center gap-x-4 gap-y-1 px-5 py-2.5 text-sm"
           >
-            <time
-              dateTime={observation.observedAt}
-              className="min-w-36 text-muted-foreground tabular-nums"
+            <ScanLink
+              scanId={observation.scanId}
+              className="min-w-36 rounded-sm text-muted-foreground tabular-nums underline-offset-4 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Scan of ${formatDateTime(observation.observedAt)}`}
             >
-              {formatDateTime(observation.observedAt)}
-            </time>
+              <time dateTime={observation.observedAt}>
+                {formatDateTime(observation.observedAt)}
+              </time>
+            </ScanLink>
             <span className={cn('font-mono tabular-nums', ipChanged && 'text-warning')}>
               {observation.ipAddress}
               {ipChanged && <span className="sr-only"> (new address)</span>}

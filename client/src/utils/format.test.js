@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatLatency, formatPercent, formatRelativeTime } from './format';
+import {
+  formatDuration,
+  formatElapsed,
+  formatLatency,
+  formatPercent,
+  formatRelativeTime,
+} from './format';
 import { compareIp } from './ip';
 
 describe('formatRelativeTime', () => {
@@ -50,5 +56,14 @@ describe('formatPercent', () => {
     expect(formatPercent(199, 200)).toBe('99%');
     expect(formatPercent(12, 12)).toBe('100%');
     expect(formatPercent(0, 0)).toBe('—');
+  });
+});
+
+describe('formatElapsed', () => {
+  it('is precise for short runs and switches to units for long ones', () => {
+    expect(formatElapsed(850)).toBe('850 ms');
+    expect(formatElapsed(1_234)).toBe('1.2 s');
+    expect(formatElapsed(48_400)).toBe('48 s');
+    expect(formatElapsed(125_000)).toBe('2m 5s');
   });
 });

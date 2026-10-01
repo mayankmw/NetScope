@@ -1,7 +1,7 @@
 # NetScope Database
 
-> Status: **Step 7.** Initial schema (Step 2), the device timeline (`device_events`, Step 6), and
-> port scan details (Step 7).
+> Status: **Step 9.** Initial schema (Step 2), the device timeline (`device_events`, Step 6), port
+> scan details (Step 7), and the scan history (discovery summaries and history indexes, Step 9).
 > Source of truth: [`server/src/db/migrations/`](../server/src/db/migrations/).
 
 ## 1. Role
@@ -62,35 +62,37 @@ There is no single generic `scan_results` table. A discovery result ("device X w
 latency Z") and a port result ("port P on device X was open") have different shapes. One table
 would need nullable columns or untyped JSON, so each scan type writes to its own typed result table.
 
-| Table                 | Purpose                                                          | Key constraints                                                                                   |
-| --------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `networks`            | A monitored LAN (the same laptop can join several)               | Unique `(gateway_mac, cidr)`; gateway inside `cidr`; IPv4 only                                    |
-| `device_types`        | Device categories (`router`, `phone`, `printer`, …)              | Code format check; 16 seeded rows                                                                 |
-| `devices`             | Current state of each device                                     | Unique `(network_id, mac_address)`; host IPv4 only; type FK                                       |
-| `scans`               | One row per scan run (`discovery` or `port`)                     | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device |
-| `device_observations` | Discovery results: device seen by a scan, with its IP then       | Unique `(scan_id, device_id)`                                                                     |
-| `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)   | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history       |
-| `device_ports`        | TCP ports ever found open on a device, latest service/version    | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                      |
-| `port_scan_results`   | Port results: state (and service/version) of a port in one scan  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                              |
-| `alerts`              | Notable changes (new device, offline, IP changed, new open port) | Type/severity checks; SET NULL on device/scan delete to keep history                              |
+| Table                 | Purpose                                                          | Key constraints                                                                                                                         |
+| --------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `networks`            | A monitored LAN (the same laptop can join several)               | Unique `(gateway_mac, cidr)`; gateway inside `cidr`; IPv4 only                                                                          |
+| `device_types`        | Device categories (`router`, `phone`, `printer`, …)              | Code format check; 16 seeded rows                                                                                                       |
+| `devices`             | Current state of each device                                     | Unique `(network_id, mac_address)`; host IPv4 only; type FK                                                                             |
+| `scans`               | One row per scan run (`discovery` or `port`), with its outcome   | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device; a discovery `summary` has its counts |
+| `device_observations` | Discovery results: device seen by a scan, with its IP then       | Unique `(scan_id, device_id)`                                                                                                           |
+| `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)   | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history                                             |
+| `device_ports`        | TCP ports ever found open on a device, latest service/version    | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                                                            |
+| `port_scan_results`   | Port results: state (and service/version) of a port in one scan  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                                                                    |
+| `alerts`              | Notable changes (new device, offline, IP changed, new open port) | Type/severity checks; SET NULL on device/scan delete to keep history                                                                    |
 
 ### Indexes
 
-| Index                                                                | Serves                                              |
-| -------------------------------------------------------------------- | --------------------------------------------------- |
-| `devices_network_mac_key` (unique)                                   | Discovery matching by MAC; per-network device lists |
-| `devices_network_status_idx`                                         | Online/offline counts and filters                   |
-| `devices_network_first_seen_idx`                                     | "New devices in the last 24 h"                      |
-| `devices_network_ip_idx`                                             | Looking up a device by current IP                   |
-| `scans_single_active_idx` (partial unique)                           | Enforces one queued/running scan                    |
-| `scans_network_created_idx`                                          | Scan history per network                            |
-| `scans_target_device_created_idx` (partial)                          | Latest port scan for a device                       |
-| `device_observations_device_observed_idx`                            | Device presence / IP history; discovery history     |
-| `device_events_device_occurred_idx`                                  | A device's timeline, newest first (keyset paging)   |
-| `device_events_scan_idx` (partial)                                   | FK lookup when scans are purged                     |
-| `port_scan_results_port_observed_idx`                                | Port state history                                  |
-| `alerts_open_idx` (partial)                                          | Unacknowledged alerts (inbox, badge count)          |
-| `alerts_network_created_idx`, `alerts_device_idx`, `alerts_scan_idx` | Alert history; FK lookups                           |
+| Index                                                                | Serves                                               |
+| -------------------------------------------------------------------- | ---------------------------------------------------- |
+| `devices_network_mac_key` (unique)                                   | Discovery matching by MAC; per-network device lists  |
+| `devices_network_status_idx`                                         | Online/offline counts and filters                    |
+| `devices_network_first_seen_idx`                                     | "New devices in the last 24 h"                       |
+| `devices_network_ip_idx`                                             | Looking up a device by current IP                    |
+| `scans_single_active_idx` (partial unique)                           | Enforces one queued/running scan                     |
+| `scans_created_idx`, `scans_type_created_idx` _(Step 9)_             | Scan history, all or by type (keyset pages)          |
+| `scans_network_type_created_idx` _(Step 9)_                          | Scan history of a network; older/newer scan          |
+| `scans_network_discoveries_idx` (partial) _(Step 9)_                 | Completed discoveries by time: last scan, presence   |
+| `scans_target_device_created_idx` (partial)                          | Port scans of a device                               |
+| `device_observations_device_observed_idx`                            | Device presence / IP history; discovery history      |
+| `device_events_device_occurred_idx`                                  | A device's timeline, newest first (keyset paging)    |
+| `device_events_scan_idx` (partial)                                   | What a scan changed; FK lookup when scans are purged |
+| `port_scan_results_port_observed_idx`                                | Port state history                                   |
+| `alerts_open_idx` (partial)                                          | Unacknowledged alerts (inbox, badge count)           |
+| `alerts_network_created_idx`, `alerts_device_idx`, `alerts_scan_idx` | Alert history; FK lookups                            |
 
 ## 4. Device identity
 
@@ -157,6 +159,32 @@ keeps the outcome counts (`portsChecked`, `open`, `closed`, `filtered`, `openPor
   per port that was open before and is not now (its `closed` / `filtered` state). Closed ports
   that were never open are only counted in `summary`.
 
+### Scan history (Step 9)
+
+The history is the records above: `scans` (each run), `device_observations` (devices a discovery
+found), `device_events` (status and detail changes), `port_scan_results` (port states per scan).
+Step 9 adds no table. Its migration (`…_scan-history.sql`):
+
+- **Discovery summary on the scan.** A completed discovery now writes its outcome to
+  `scans.summary` in the transaction that records its results:
+  `{ devicesFound, newDevices, backOnline, wentOffline, missingDevices, knownDevices, ipChanges,
+unresolvedHosts }`. The history lists scans from this snapshot instead of counting
+  observations per row, and keeps what the scan reported even if devices change later. A
+  `CHECK` (`scans_discovery_summary_counts`) requires the counts the history shows.
+- **Backfill.** Completed discoveries recorded earlier get a summary computed from their
+  observations and events (`unresolvedHosts` was not stored: `null`).
+- **Indexes.** Keyset pagination on `(created_at, id)` for all scans, scans of a type, and scans
+  of a type on a network (replacing the network-only index), and a partial index on completed
+  discoveries by `finished_at`, used by the network's last scan, the presence history, and the
+  "scans since first seen" count.
+
+`missingDevices` counts devices known before the scan (`first_seen_at < started_at`) that it did
+not find; `GET /api/scans/:id` lists them with the same rule. Definitions and pages:
+[SCAN_HISTORY.md](SCAN_HISTORY.md).
+
+The down migration drops the constraint and indexes, restores the previous network index, and
+clears discovery summaries (they did not exist before).
+
 ## 5. Migrations
 
 - Tool: [node-pg-migrate](https://github.com/salsita/node-pg-migrate), using **plain SQL files** with
@@ -196,5 +224,7 @@ automatically before the suite runs.
 
 `device_observations` grows by roughly devices × scans: 50 devices scanned every 5 minutes is
 about 14k rows/day, which is small for PostgreSQL. `device_events` grows only with changes
-(mostly phones and laptops coming and going). A retention purge (`DATA_RETENTION_DAYS`)
-arrives with scheduled scans in Step 9.
+(mostly phones and laptops coming and going). Scans run on demand for now, so growth follows
+how often someone scans. A retention purge (`DATA_RETENTION_DAYS`) is planned together with
+scheduled scans: `device_events.scan_id` is `SET NULL` on scan deletion, so purging old scans
+keeps device timelines.

@@ -11,6 +11,7 @@ import { resetPortScanStore, usePortScanStore } from '@/stores/usePortScanStore'
 import {
   DEVICE_ID,
   makeDeviceDetails,
+  makeDeviceHistory,
   makeDevice,
   makeDevicePorts,
   makeInventory,
@@ -30,6 +31,7 @@ vi.mock('@/services/deviceService', () => ({
   listDeviceObservations: vi.fn(),
   getDevicePorts: vi.fn(),
   startPortScan: vi.fn(),
+  getDeviceHistory: vi.fn(),
 }));
 
 function renderAt(url) {
@@ -62,6 +64,7 @@ beforeEach(() => {
     items: [makeObservation({ id: '2' })],
     nextCursor: '2',
   });
+  deviceService.getDeviceHistory.mockResolvedValue(makeDeviceHistory());
 });
 
 describe('DeviceDetailsPage', () => {
@@ -175,6 +178,49 @@ describe('DeviceDetailsPage', () => {
     expect(await within(history).findByText('no ping reply')).toBeInTheDocument();
     expect(within(history).getAllByRole('listitem')).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /load older scans/i })).not.toBeInTheDocument();
+  });
+
+  it('shows its presence history, and another period on request', async () => {
+    const user = userEvent.setup();
+    renderAt(`/devices/${DEVICE_ID}`);
+    await screen.findByRole('heading', { level: 1, name: 'raspberrypi.lan' });
+
+    const presence = panel('Presence history');
+    expect(presence).toHaveTextContent('Seen by 2 of 3 scans (67%)');
+    expect(presence).toHaveTextContent('went offline 1 time · longest offline 3h 0m');
+    expect(
+      within(presence)
+        .getAllByTestId('presence-segment')
+        .map((segment) => segment.dataset.status),
+    ).toEqual(['unknown', 'online', 'offline', 'online']);
+    expect(
+      within(presence)
+        .getAllByTestId('presence-scan')
+        .map((cell) => cell.dataset.seen),
+    ).toEqual(['true', 'false', 'true']);
+    const periods = within(presence).getByRole('list', { name: 'Online and offline periods' });
+    expect(within(periods).getAllByRole('listitem')[0]).toHaveTextContent(
+      /Online.*→ now \(2h 0m\)/,
+    );
+
+    await user.click(within(presence).getByRole('radio', { name: '7 days' }));
+    expect(deviceService.getDeviceHistory).toHaveBeenLastCalledWith(DEVICE_ID, {
+      days: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('links each scan of the discovery history to its page', async () => {
+    const user = userEvent.setup();
+    renderAt(`/devices/${DEVICE_ID}`);
+    await screen.findByRole('heading', { level: 1, name: 'raspberrypi.lan' });
+
+    await user.click(screen.getByRole('radio', { name: 'Discovery history' }));
+    const history = screen.getByRole('list', { name: 'Discovery history' });
+    expect(within(history).getByRole('link', { name: /^Scan of / })).toHaveAttribute(
+      'href',
+      '/scans/scan-1',
+    );
   });
 
   it("shows this computer's interface when the device is the NetScope host", async () => {

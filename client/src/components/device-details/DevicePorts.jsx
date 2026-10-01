@@ -1,8 +1,8 @@
-import { Loader2, RefreshCw, ScanSearch, ShieldCheck, Sparkles, TriangleAlert } from 'lucide-react';
+import { Loader2, RefreshCw, ScanSearch, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { Link } from 'react-router';
 import { ErrorState } from '@/components/common/ErrorState';
 import { GlassPanel } from '@/components/common/GlassPanel';
 import { RelativeTime } from '@/components/common/RelativeTime';
-import { Tag } from '@/components/common/Tag';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDevicePorts } from '@/hooks/useDevicePorts';
@@ -10,7 +10,7 @@ import { useNow } from '@/hooks/useNow';
 import { cn } from '@/lib/utils';
 import { usePortScanStore } from '@/stores/usePortScanStore';
 import { formatDuration } from '@/utils/format';
-import { serviceDescription } from '@/utils/portScan';
+import { PortRow } from './PortRow';
 
 function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -72,37 +72,6 @@ function ScanningIndicator({ startedAt, ipAddress, portCount }) {
         <div className="h-full w-1/3 rounded-full bg-primary shadow-[0_0_10px_var(--primary)] motion-safe:animate-scan-sweep motion-reduce:w-full motion-reduce:animate-none motion-reduce:opacity-60" />
       </div>
     </div>
-  );
-}
-
-function PortRow({ port, now }) {
-  const open = port.state === 'open';
-  const description = serviceDescription(port);
-  return (
-    <li className="grid grid-cols-[4.5rem_1fr] items-baseline gap-x-3 gap-y-0.5 px-5 py-2.5 text-sm sm:grid-cols-[5rem_8rem_1fr_auto]">
-      <span
-        className={cn('font-mono tabular-nums', open ? 'text-primary' : 'text-muted-foreground')}
-      >
-        {port.port}/{port.protocol}
-      </span>
-      <span className={cn('truncate font-medium', !open && 'text-muted-foreground')}>
-        {port.service ?? 'unknown'}
-      </span>
-      <span className="col-start-2 min-w-0 truncate text-xs text-muted-foreground sm:col-start-auto sm:text-sm">
-        {open ? (description ?? 'Version not identified') : `Now ${port.state}`}
-      </span>
-      <span className="col-start-2 flex items-center gap-2 text-xs text-muted-foreground sm:col-start-auto sm:justify-end">
-        {open && port.isNew && (
-          <Tag tone="magenta" icon={Sparkles}>
-            New
-          </Tag>
-        )}
-        <span>
-          {open ? 'open since ' : 'last open '}
-          <RelativeTime value={open ? port.firstSeenOpenAt : port.lastSeenOpenAt} now={now} />
-        </span>
-      </span>
-    </li>
   );
 }
 
@@ -276,11 +245,19 @@ export function DevicePorts({ device, now, className }) {
 
       <p className="flex items-start gap-2 border-t border-border px-5 py-3 text-xs text-muted-foreground">
         <ShieldCheck className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-        <span>
+        <span className="flex-1">
           {disabledReason && profile ? `${disabledReason} ` : ''}
           Only this device&apos;s known address is checked, with a fixed list of ports and ordinary
           connections. No login attempts, exploits, or OS fingerprinting.
         </span>
+        {data?.scan && (
+          <Link
+            to={`/scans?${new URLSearchParams({ type: 'port', device: device.id })}`}
+            className="shrink-0 rounded-sm text-primary underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            All port scans
+          </Link>
+        )}
       </p>
     </GlassPanel>
   );

@@ -5,6 +5,7 @@ import { scanRateLimit } from '../middleware/rateLimit.js';
 import { validate } from '../middleware/validate.js';
 import {
   discoverDevicesSchemas,
+  getDeviceHistorySchemas,
   getDevicePortsSchemas,
   getDeviceSchemas,
   listDeviceHistorySchemas,
@@ -35,6 +36,11 @@ devicesRouter.get(
   '/:deviceId/observations',
   validate(listDeviceHistorySchemas),
   devicesController.listDeviceObservations,
+);
+devicesRouter.get(
+  '/:deviceId/history',
+  validate(getDeviceHistorySchemas),
+  devicesController.getDeviceHistory,
 );
 devicesRouter.post(
   '/:deviceId/scan',

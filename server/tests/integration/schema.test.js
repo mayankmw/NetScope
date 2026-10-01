@@ -156,6 +156,28 @@ describe('scans', () => {
     });
   });
 
+  it('requires the history counts in a discovery summary', async () => {
+    await expect(
+      insertScan({
+        status: 'completed',
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        summary: { devicesFound: 3 },
+      }),
+    ).rejects.toMatchObject({
+      code: CHECK_VIOLATION,
+      constraint: 'scans_discovery_summary_counts',
+    });
+    await expect(
+      insertScan({
+        status: 'completed',
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        summary: { devicesFound: 3, newDevices: 0, missingDevices: 1 },
+      }),
+    ).resolves.toBeDefined();
+  });
+
   it('records each device at most once per scan', async () => {
     const network = await insertNetwork();
     const device = await insertDevice(network.id);

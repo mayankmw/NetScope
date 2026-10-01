@@ -196,8 +196,11 @@ describe('POST /api/devices/discover', () => {
     expect(data.summary).toEqual({
       devicesFound: 3,
       newDevices: 3,
-      ipChanges: 0,
+      backOnline: 0,
       wentOffline: 0,
+      missingDevices: 0,
+      knownDevices: 3,
+      ipChanges: 0,
       unresolvedHosts: 1,
     });
     expect(data.unresolvedHosts).toEqual(['192.168.50.77']);
@@ -308,6 +311,64 @@ describe('POST /api/devices/discover', () => {
       '192.168.50.21',
       '192.168.50.20',
     ]);
+  });
+
+  it('records each run in the scan history, with what it found, missed, and changed', async () => {
+    const first = await discover().expect(200);
+    const pi = first.body.data.devices.find((device) => device.macAddress === PI_MAC);
+    scenario.current = makeScenario({ piIp: null });
+    const second = await discover().expect(200); // the Pi is missing
+    scenario.current = makeScenario({ piIp: '192.168.50.21' });
+    const third = await discover().expect(200); // back, at a new address
+
+    const history = await request(app).get('/api/scans?type=discovery').expect(200);
+    expect(history.body.data.map((scan) => scan.id)).toEqual(
+      [third, second, first].map((res) => res.body.data.scan.id),
+    );
+    expect(history.body.data.map((scan) => scan.summary)).toEqual(
+      [third, second, first].map((res) => res.body.data.summary),
+    );
+    expect(second.body.data.summary).toEqual({
+      devicesFound: 2,
+      newDevices: 0,
+      backOnline: 0,
+      wentOffline: 1,
+      missingDevices: 1,
+      knownDevices: 3,
+      ipChanges: 0,
+      unresolvedHosts: 1,
+    });
+    expect(third.body.data.summary).toMatchObject({
+      backOnline: 1,
+      ipChanges: 1,
+      missingDevices: 0,
+    });
+
+    const missed = await request(app).get(`/api/scans/${second.body.data.scan.id}`).expect(200);
+    expect(missed.body.data.results.missing).toEqual([
+      {
+        device: expect.objectContaining({ id: pi.id, macAddress: PI_MAC }),
+        wentOffline: true,
+        lastSeenAt: first.body.data.scan.finishedAt,
+        lastIpAddress: '192.168.50.20',
+      },
+    ]);
+
+    const back = await request(app).get(`/api/scans/${third.body.data.scan.id}`).expect(200);
+    expect(back.body.data.results.found.find((entry) => entry.device.id === pi.id)).toMatchObject({
+      ipAddress: '192.168.50.21',
+      isNew: false,
+      backOnline: true,
+      changes: { ipAddress: { from: '192.168.50.20', to: '192.168.50.21' } },
+    });
+
+    const presence = await request(app).get(`/api/devices/${pi.id}/history`).expect(200);
+    expect(presence.body.data.periods.map((period) => [period.status, period.scanId])).toEqual([
+      ['online', first.body.data.scan.id],
+      ['offline', second.body.data.scan.id],
+      ['online', third.body.data.scan.id],
+    ]);
+    expect(presence.body.data.scans).toMatchObject({ total: 3, seen: 2 });
   });
 
   it('never overwrites what the user set, or data this scan could not see', async () => {

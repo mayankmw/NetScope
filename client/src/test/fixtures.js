@@ -258,3 +258,198 @@ export function makeScannedPorts() {
     },
   });
 }
+
+export const SCAN_ID = '3cba97d2-04cc-4586-b3e4-7294ef538422';
+
+export function makeDiscoverySummary(overrides = {}) {
+  return {
+    devicesFound: 3,
+    newDevices: 0,
+    backOnline: 0,
+    wentOffline: 0,
+    missingDevices: 1,
+    knownDevices: 4,
+    ipChanges: 0,
+    unresolvedHosts: 0,
+    ...overrides,
+  };
+}
+
+/** Shaped like an entry of GET /api/scans. Default: a completed discovery, 10 minutes ago. */
+export function makeScan(overrides = {}) {
+  const startedAt = overrides.startedAt ?? new Date(Date.now() - 10 * 60_000).toISOString();
+  return {
+    id: SCAN_ID,
+    type: 'discovery',
+    status: 'completed',
+    triggeredBy: 'manual',
+    target: '192.168.1.0/24',
+    network: { id: NETWORK.id, cidr: NETWORK.cidr },
+    device: null,
+    createdAt: startedAt,
+    startedAt,
+    finishedAt: new Date(new Date(startedAt).getTime() + 1_400).toISOString(),
+    durationMs: 1_400,
+    error: null,
+    summary: makeDiscoverySummary(),
+    ...overrides,
+  };
+}
+
+/** A completed port scan of the Raspberry Pi that found SSH and HTTP open. */
+export function makePortScanEntry(overrides = {}) {
+  return makeScan({
+    id: 'a0b1c2d3-0000-4000-8000-000000000022',
+    type: 'port',
+    target: '192.168.1.21',
+    device: {
+      id: DEVICE_ID,
+      ipAddress: '192.168.1.21',
+      macAddress: 'b8:27:eb:12:34:56',
+      hostname: 'raspberrypi.lan',
+      displayName: null,
+      vendor: 'Raspberry Pi Foundation',
+      deviceType: 'computer',
+      isGateway: false,
+    },
+    durationMs: 7_000,
+    summary: {
+      portsChecked: 63,
+      open: 2,
+      closed: 61,
+      filtered: 0,
+      openPorts: [22, 80],
+      newlyOpen: [22],
+      noLongerOpen: [],
+    },
+    ...overrides,
+  });
+}
+
+/**
+ * Shaped like GET /api/scans/:scanId for a discovery: the Pi moved to .21, the phone came back,
+ * a new Synology appeared, and a printer went missing.
+ */
+export function makeScanDetails(overrides = {}) {
+  const inventory = makeInventory().devices;
+  const [gateway, phone, pi, nas] = inventory;
+  const printer = makeDevice({
+    id: 'device-192.168.1.25',
+    ipAddress: '192.168.1.25',
+    hostname: 'printer',
+    deviceType: 'printer',
+    status: 'offline',
+  });
+  const found = (device, extra = {}) => ({
+    device: { isSelf: false, ...device },
+    ipAddress: device.ipAddress,
+    hostname: device.hostname,
+    latencyMs: 3.2,
+    isNew: false,
+    backOnline: false,
+    changes: {},
+    ...extra,
+  });
+  // Both times from one clock reading, so "last seen 1h 0m before" is exact.
+  const startedAt = new Date(Date.now() - 10 * 60_000);
+  return {
+    scan: {
+      ...makeScan({
+        startedAt: startedAt.toISOString(),
+        summary: makeDiscoverySummary({
+          devicesFound: 4,
+          newDevices: 1,
+          backOnline: 1,
+          wentOffline: 1,
+          missingDevices: 1,
+          knownDevices: 5,
+          ipChanges: 1,
+        }),
+      }),
+      network: { id: NETWORK.id, cidr: NETWORK.cidr, interfaceName: 'en0' },
+      params: {
+        sweepCidr: '192.168.1.0/24',
+        interfaceName: 'en0',
+        pingTimeoutMs: 1000,
+        pingConcurrency: 64,
+        nmap: 'auto',
+      },
+      ...overrides.scan,
+    },
+    previous: { id: 'b0000000-0000-4000-8000-000000000001', createdAt: NETWORK.firstSeenAt },
+    next: null,
+    results:
+      'results' in overrides
+        ? overrides.results
+        : {
+            found: [
+              found(gateway),
+              found(phone, { backOnline: true }),
+              found(pi, {
+                ipAddress: '192.168.1.21',
+                changes: { ipAddress: { from: '192.168.1.20', to: '192.168.1.21' } },
+              }),
+              found(nas, { isNew: true, latencyMs: null }),
+            ],
+            missing: [
+              {
+                device: { isSelf: false, ...printer },
+                wentOffline: true,
+                lastSeenAt: new Date(startedAt.getTime() - 60 * 60_000).toISOString(),
+                lastIpAddress: '192.168.1.25',
+              },
+            ],
+          },
+    ...overrides.top,
+  };
+}
+
+/**
+ * Shaped like GET /api/devices/:deviceId/history: online for 2 hours, offline for 3 hours before
+ * that, first seen 72 hours ago (30-day range).
+ */
+export function makeDeviceHistory(overrides = {}) {
+  const now = Date.now();
+  const iso = (hoursAgo) => new Date(now - hoursAgo * HOUR).toISOString();
+  return {
+    range: { from: iso(30 * 24), to: iso(0), days: 30 },
+    firstSeenAt: iso(72),
+    status: 'online',
+    periods: [
+      { status: 'online', from: iso(72), to: iso(5), scanId: 'scan-1' },
+      { status: 'offline', from: iso(5), to: iso(2), scanId: 'scan-2' },
+      { status: 'online', from: iso(2), to: null, scanId: 'scan-3' },
+    ],
+    scans: {
+      total: 3,
+      seen: 2,
+      items: [
+        {
+          id: 'scan-3',
+          finishedAt: iso(2),
+          triggeredBy: 'manual',
+          seen: true,
+          ipAddress: '192.168.1.21',
+          latencyMs: 4,
+        },
+        {
+          id: 'scan-2',
+          finishedAt: iso(5),
+          triggeredBy: 'manual',
+          seen: false,
+          ipAddress: null,
+          latencyMs: null,
+        },
+        {
+          id: 'scan-1',
+          finishedAt: iso(72),
+          triggeredBy: 'manual',
+          seen: true,
+          ipAddress: '192.168.1.20',
+          latencyMs: 5,
+        },
+      ],
+    },
+    ...overrides,
+  };
+}

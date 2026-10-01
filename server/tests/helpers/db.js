@@ -44,8 +44,9 @@ export async function insertDevice(networkId, overrides = {}) {
 /** Inserts a scan with sensible defaults (a queued discovery scan). */
 export async function insertScan(overrides = {}) {
   const { rows } = await query(
-    `INSERT INTO scans (network_id, type, status, target, target_device_id, started_at, finished_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO scans (network_id, type, status, target, target_device_id, started_at, finished_at,
+                        summary, error_code, error_message, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11, now()))
      RETURNING *`,
     [
       overrides.networkId ?? null,
@@ -55,6 +56,10 @@ export async function insertScan(overrides = {}) {
       overrides.targetDeviceId ?? null,
       overrides.startedAt ?? null,
       overrides.finishedAt ?? null,
+      overrides.summary ?? null,
+      overrides.errorCode ?? null,
+      overrides.errorMessage ?? null,
+      overrides.createdAt ?? overrides.startedAt ?? null,
     ],
   );
   return rows[0];

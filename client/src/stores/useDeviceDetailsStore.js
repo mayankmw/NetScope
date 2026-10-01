@@ -3,8 +3,9 @@ import { create } from 'zustand';
 import * as deviceService from '@/services/deviceService';
 
 /**
- * The device shown on the details page: its details, its timeline (`events`), and its discovery
- * history (`observations`). One device at a time.
+ * The device shown on the details page: its details, its timeline (`events`), its discovery
+ * history (`observations`), and its presence over the last days (`presenceHistory`). One device at a
+ * time.
  *
  * Kept current like the inventory ("snapshot + delta"):
  * - REST: `open()` loads everything; `refresh()` reloads it in the background and adds new
@@ -18,6 +19,8 @@ import * as deviceService from '@/services/deviceService';
  */
 
 export const HISTORY_PAGE_SIZE = 20;
+export const PRESENCE_RANGES = [7, 30, 90];
+const DEFAULT_PRESENCE_DAYS = 30;
 const REFRESH_DELAY_MS = 400;
 
 /** History name → service function name (resolved at call time, so tests can mock the module). */
@@ -47,6 +50,17 @@ const initialHistory = {
   moreError: null,
 };
 
+const initialPresence = {
+  /** @type {number} the range shown, in days (kept from one device to the next) */
+  days: DEFAULT_PRESENCE_DAYS,
+  /** @type {'idle' | 'loading' | 'success' | 'error'} */
+  status: 'idle',
+  /** @type {import('@/types/api').DeviceHistory | null} */
+  data: null,
+  /** @type {import('@/services/apiClient').ApiError | null} */
+  error: null,
+};
+
 const initialState = {
   /** @type {string | null} */
   deviceId: null,
@@ -61,6 +75,7 @@ const initialState = {
   changedAt: null,
   events: initialHistory,
   observations: initialHistory,
+  presenceHistory: initialPresence,
 };
 
 /** Cancels every request of the current page visit; null while no page is open. */
@@ -149,6 +164,25 @@ export const useDeviceDetailsStore = create((set, get) => {
     }
   }
 
+  async function loadPresence(deviceId, signal) {
+    const { days } = get().presenceHistory;
+    try {
+      const data = await deviceService.getDeviceHistory(deviceId, { days, signal });
+      if (!isCurrent(deviceId, signal) || get().presenceHistory.days !== days) return;
+      set((state) => ({
+        presenceHistory: { ...state.presenceHistory, status: 'success', data, error: null },
+      }));
+    } catch (error) {
+      if (!isCurrent(deviceId, signal) || get().presenceHistory.days !== days) return;
+      // A failed background refresh keeps the presence already shown.
+      set((state) =>
+        state.presenceHistory.status === 'success'
+          ? state
+          : { presenceHistory: { ...state.presenceHistory, status: 'error', error } },
+      );
+    }
+  }
+
   function scheduleRefresh() {
     if (!session) return;
     clearTimeout(refreshTimer);
@@ -177,11 +211,17 @@ export const useDeviceDetailsStore = create((set, get) => {
         status: 'loading',
         events: { ...initialHistory, status: 'loading' },
         observations: { ...initialHistory, status: 'loading' },
+        presenceHistory: {
+          ...initialPresence,
+          days: state.presenceHistory.days,
+          status: 'loading',
+        },
       });
       return Promise.all([
         loadDetails(deviceId, signal),
         loadFirstPage('events', deviceId, signal),
         loadFirstPage('observations', deviceId, signal),
+        loadPresence(deviceId, signal),
       ]).then(() => undefined);
     },
 
@@ -198,7 +238,27 @@ export const useDeviceDetailsStore = create((set, get) => {
         loadDetails(deviceId, signal),
         loadFirstPage('events', deviceId, signal),
         loadFirstPage('observations', deviceId, signal),
+        loadPresence(deviceId, signal),
       ]).then(() => undefined);
+    },
+
+    /** Shows the presence of the last `days` days. @param {number} days */
+    setPresenceDays(days) {
+      const { deviceId, presenceHistory } = get();
+      if (presenceHistory.days === days) return Promise.resolve();
+      set({ presenceHistory: { ...initialPresence, days, status: session ? 'loading' : 'idle' } });
+      if (!session || !deviceId) return Promise.resolve();
+      return loadPresence(deviceId, session.signal);
+    },
+
+    /** Retries a presence history that failed to load. */
+    retryPresence() {
+      const { deviceId } = get();
+      if (!session || !deviceId) return Promise.resolve();
+      set((state) => ({
+        presenceHistory: { ...state.presenceHistory, status: 'loading', error: null },
+      }));
+      return loadPresence(deviceId, session.signal);
     },
 
     /** Retries a history whose first page failed. @param {'events' | 'observations'} kind */
@@ -256,6 +316,11 @@ export const useDeviceDetailsStore = create((set, get) => {
         isRefreshing: false,
         events: settle(state.events),
         observations: settle(state.observations),
+        presenceHistory: {
+          ...state.presenceHistory,
+          status:
+            state.presenceHistory.status === 'loading' ? 'idle' : state.presenceHistory.status,
+        },
       }));
     },
 

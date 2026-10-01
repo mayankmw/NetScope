@@ -42,6 +42,14 @@ export async function listDeviceObservations(req, res) {
   sendSuccess(res, items, { meta: { limit, nextCursor } });
 }
 
+/** GET /api/devices/:deviceId/history — online / offline periods and per-scan presence. */
+export async function getDeviceHistory(req, res) {
+  sendSuccess(
+    res,
+    await devicesService.getDeviceHistory(req.validated.params.deviceId, req.validated.query),
+  );
+}
+
 /**
  * POST /api/devices/:deviceId/scan — starts a port scan of the device. 202: the scan runs in the
  * background; GET …/ports (or the portscan.* events) report its outcome.

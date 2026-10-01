@@ -20,6 +20,15 @@ describe('backLink', () => {
     });
     expect(backLink('/')).toEqual({ to: '/', label: 'Overview' });
     expect(backLink('/topology')).toEqual({ to: '/topology', label: 'Topology' });
+    expect(backLink('/scans?type=port')).toEqual({ to: '/scans?type=port', label: 'Scans' });
+    expect(backLink('/scans/abc')).toEqual({ to: '/scans/abc', label: 'Scan' });
+    expect(backLink('/devices/abc')).toEqual({ to: '/devices/abc', label: 'Device' });
+    expect(backLink('/settings')).toEqual({ to: '/settings', label: 'Back' });
+  });
+
+  it('can fall back to another page', () => {
+    const scans = { to: '/scans', label: 'Scans' };
+    expect(backLink(undefined, scans)).toBe(scans);
   });
 
   it.each([undefined, 'https://example.com', '//example.com/devices', 42])(

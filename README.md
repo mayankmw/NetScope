@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 8 of 12 — network topology. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 9 of 12 — historical scans. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -27,7 +27,7 @@ Details: [Architecture §5 — Network layer and safety model](docs/ARCHITECTURE
 - Device details: identity, network, presence, activity timeline, and discovery history
 - Safe port scans of a single known device (fixed TCP connect profile, service detection)
 - Interactive logical network topology (gateway → devices), live
-- Scan history and device presence timeline
+- Scan history (what each scan found, missed, and changed) and device presence history
 - New-device and change alerts
 - CSV / JSON report export
 
@@ -145,6 +145,15 @@ for its details, or double-click to open it. It is a **logical** topology: a lin
 gateway's subnet", not a cable or a Wi-Fi link, which NetScope cannot see. A list view shows the
 same structure for keyboard and screen-reader use. Details: [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
 
+**Scans** lists every network discovery and port scan, newest first: when it ran, how long it
+took, how many devices it found, how many were new, and how many known devices were missing. A
+chart shows found, new, and missing devices across the last 30 network scans. Open a scan to see
+what changed (new devices, back online, went offline, new addresses), every device it found and
+where, the known devices it missed, and the exact settings it ran with; step to the older or newer
+scan. On a device's page, **Presence history** shows when it was online and offline over the last
+7, 30, or 90 days, and which scans found it. Details:
+[docs/SCAN_HISTORY.md](docs/SCAN_HISTORY.md).
+
 From the command line:
 
 ```bash
@@ -154,6 +163,9 @@ curl -s http://127.0.0.1:4000/api/devices/<deviceId> | python3 -m json.tool
 curl -s "http://127.0.0.1:4000/api/devices/<deviceId>/events?limit=10" | python3 -m json.tool
 curl -s -X POST http://127.0.0.1:4000/api/devices/<deviceId>/scan | python3 -m json.tool   # 202
 curl -s http://127.0.0.1:4000/api/devices/<deviceId>/ports | python3 -m json.tool
+curl -s "http://127.0.0.1:4000/api/scans?type=discovery&limit=5" | python3 -m json.tool
+curl -s http://127.0.0.1:4000/api/scans/<scanId> | python3 -m json.tool
+curl -s "http://127.0.0.1:4000/api/devices/<deviceId>/history?days=7" | python3 -m json.tool
 ```
 
 Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
@@ -213,7 +225,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 6. ✅ Device details
 7. ✅ Safe port scanning
 8. ✅ Network topology visualization
-9. Historical scans
+9. ✅ Historical scans
 10. New-device alerts
 11. Report export
 12. Deployment

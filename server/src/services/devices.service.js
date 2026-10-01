@@ -6,6 +6,11 @@ import { AppError } from '../errors/AppError.js';
 import { ErrorCodes } from '../errors/errorCodes.js';
 import * as network from '../network/index.js';
 import { toDeviceDto, toDeviceEventDto, toNetworkDto, toObservationDto } from './dto.js';
+import { buildPresencePeriods } from './presence.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Most recent scans listed individually in a presence history (totals cover all of them). */
+const HISTORY_SCAN_LIMIT = 100;
 
 function deviceNotFound(deviceId) {
   return new AppError('Device not found.', {
@@ -128,4 +133,56 @@ export function listDeviceEvents(deviceId, page) {
  */
 export function listDeviceObservations(deviceId, page) {
   return readPage(deviceId, page, devicesRepository.listDeviceObservations, toObservationDto);
+}
+
+/**
+ * A device's presence over the last `days` days: its online / offline periods (from its
+ * timeline), and every completed discovery of its network since it was first seen, with whether
+ * the scan saw it. Scans are listed newest first, at most HISTORY_SCAN_LIMIT; `total` and `seen`
+ * count all of them.
+ *
+ * @param {string} deviceId
+ * @param {{ days: number }} options
+ */
+export async function getDeviceHistory(deviceId, { days }) {
+  const device = await devicesRepository.findDeviceById(db, deviceId);
+  if (!device) throw deviceNotFound(deviceId);
+
+  const to = new Date();
+  const from = new Date(to.getTime() - days * DAY_MS);
+  const firstSeenAt = new Date(device.first_seen_at);
+  const [scans, events] = await Promise.all([
+    devicesRepository.listPresenceScans(db, {
+      deviceId,
+      networkId: device.network_id,
+      since: firstSeenAt > from ? firstSeenAt : from,
+      limit: HISTORY_SCAN_LIMIT,
+    }),
+    deviceEventsRepository.listStatusEvents(db, { deviceId, from }),
+  ]);
+
+  return {
+    range: { from, to, days },
+    firstSeenAt: device.first_seen_at,
+    status: device.status,
+    periods: buildPresencePeriods({
+      events,
+      from,
+      to,
+      firstSeenAt,
+      currentStatus: device.status,
+    }),
+    scans: {
+      total: scans[0]?.total_scans ?? 0,
+      seen: scans[0]?.total_seen ?? 0,
+      items: scans.map((row) => ({
+        id: row.id,
+        finishedAt: row.finished_at,
+        triggeredBy: row.triggered_by,
+        seen: row.seen,
+        ipAddress: row.ip_address,
+        latencyMs: row.latency_ms,
+      })),
+    },
+  };
 }

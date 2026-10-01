@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 8.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), and the WebSocket event stream are implemented. Everything else is the plan, and
+> Status: **Step 9.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events`, `observations`, and presence `history`), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), the scan history (`GET /api/scans`, `GET /api/scans/:scanId`), and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -102,8 +102,9 @@ The client adds its own codes when no envelope is available: `NETWORK_ERROR`, `T
 
 ## 5. Collections
 
-- **Pagination of histories** (append-only, newest first: device timeline, discovery history) —
-  cursor based: `?limit=20` (1–100, default 20), then `?before=<nextCursor>` for the next page →
+- **Pagination of histories** (append-only, newest first: device timeline, discovery history,
+  scan history) — cursor based: `?limit=20` (1–100, default 20), then `?before=<nextCursor>` for
+  the next page →
   `meta: { limit, nextCursor }`; `nextCursor` is `null` on the last page. Entries added while
   paging never shift pages, so nothing is skipped or repeated. Cursors are opaque strings.
 - **Pagination of other collections** — `?page=1&pageSize=50` (max 200) →
@@ -259,8 +260,11 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
     "summary": {
       "devicesFound": 2,
       "newDevices": 1,
-      "ipChanges": 1,
+      "backOnline": 0,
       "wentOffline": 0,
+      "missingDevices": 0,
+      "knownDevices": 2,
+      "ipChanges": 1,
       "unresolvedHosts": 0
     },
     "sources": {
@@ -325,6 +329,19 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
 
 `sources.*.status` is `ok`, `unavailable` (tool missing), `failed` (ran but errored), or
 `skipped` (disabled). Only an unreadable ARP cache fails the whole discovery.
+
+`summary` is also stored with the scan (`GET /api/scans`) and sent in `discovery.completed`:
+
+| Summary field     | Meaning                                                                                |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `devicesFound`    | Devices this scan found                                                                |
+| `newDevices`      | Found for the first time                                                               |
+| `backOnline`      | Offline before this scan, found again                                                  |
+| `wentOffline`     | Online before this scan, not found (inside the swept range)                            |
+| `missingDevices`  | Known before this scan and not found by it (includes `wentOffline`)                    |
+| `knownDevices`    | Devices known on the network after the scan (`devicesFound + missingDevices`)          |
+| `ipChanges`       | Devices found at a different address                                                   |
+| `unresolvedHosts` | Addresses that answered without a MAC; `null` in summaries back-filled for older scans |
 
 ### `GET /api/devices/:deviceId`
 
@@ -464,7 +481,66 @@ DNS name, and ping time in that scan. Same pagination and errors as `/events`.
 ```
 
 `latencyMs` is `null` when the device did not answer ping in that scan; `hostname` is `null` when
-that scan resolved no name. `triggeredBy` is `manual` or `schedule` (Step 9).
+that scan resolved no name. `triggeredBy` is `manual` (or `schedule`, reserved for scheduled scans).
+
+### `GET /api/devices/:deviceId/history`
+
+The device's presence over the last `days` days (`?days=30`, 1–90, default 30): its online and
+offline periods, from its timeline, and every completed discovery of its network in that range
+(since the device was first seen), with whether the scan found it. Details:
+[SCAN_HISTORY.md](SCAN_HISTORY.md#4-presence-periods).
+
+```json
+{
+  "success": true,
+  "data": {
+    "range": { "from": "2026-09-01T09:12:45.929Z", "to": "2026-10-01T09:12:45.929Z", "days": 30 },
+    "firstSeenAt": "2026-09-20T08:12:03.114Z",
+    "status": "online",
+    "periods": [
+      {
+        "status": "online",
+        "from": "2026-09-20T08:12:03.114Z",
+        "to": "2026-09-30T21:00:04.000Z",
+        "scanId": "1f0c…"
+      },
+      {
+        "status": "offline",
+        "from": "2026-09-30T21:00:04.000Z",
+        "to": "2026-10-01T07:40:00.000Z",
+        "scanId": "8a2e…"
+      },
+      { "status": "online", "from": "2026-10-01T07:40:00.000Z", "to": null, "scanId": "75966ed9-…" }
+    ],
+    "scans": {
+      "total": 52,
+      "seen": 41,
+      "items": [
+        {
+          "id": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+          "finishedAt": "2026-10-01T09:12:45.929Z",
+          "triggeredBy": "manual",
+          "seen": true,
+          "ipAddress": "192.168.1.21",
+          "latencyMs": 4.2
+        }
+      ]
+    }
+  },
+  "error": null
+}
+```
+
+| Field         | Meaning                                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `periods`     | Oldest first. `to: null` is the ongoing period. `scanId` is the scan that saw the change; `null` when the period began before the range (it is cut at `range.from`) |
+| `scans.items` | Newest first, at most 100; `ipAddress` and `latencyMs` are `null` when the scan did not find the device                                                             |
+| `scans.total` | Completed discoveries of the network in the range since the device was first seen; `seen` found the device                                                          |
+
+Status is only known when a discovery runs: between scans, a period assumes the last known status.
+
+Errors: `400 VALIDATION_ERROR` (malformed `deviceId`, `days` outside 1–90 or not an integer, unknown
+parameter), `404 NOT_FOUND`, `503 DATABASE_UNAVAILABLE`.
 
 ### `POST /api/devices/:deviceId/scan`
 
@@ -604,6 +680,145 @@ The device's ports as of its latest **completed** scan, the status of its latest
 
 Errors: `400 VALIDATION_ERROR`, `404 NOT_FOUND`, `503 DATABASE_UNAVAILABLE`.
 
+### `GET /api/scans`
+
+The scan history: every discovery and port scan, newest first, with its outcome. Read-only (scans
+are started by `POST /api/devices/discover` and `POST /api/devices/:deviceId/scan`).
+Cursor-paginated (§5). Details: [SCAN_HISTORY.md](SCAN_HISTORY.md).
+
+| Query       | Values                                                     |
+| ----------- | ---------------------------------------------------------- |
+| `type`      | `discovery` or `port`; default both                        |
+| `status`    | `queued`, `running`, `completed`, `failed`, or `cancelled` |
+| `networkId` | Scans of one network                                       |
+| `deviceId`  | Port scans of one device                                   |
+| `limit`     | 1–100, default 20                                          |
+| `before`    | `nextCursor` of the previous page (a scan id)              |
+
+Unknown ids in `networkId` / `deviceId` simply match nothing.
+
+```bash
+curl -s 'http://127.0.0.1:4000/api/scans?type=discovery&limit=1'
+```
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+      "type": "discovery",
+      "status": "completed",
+      "triggeredBy": "manual",
+      "target": "192.168.1.0/24",
+      "network": { "id": "5c50d134-16e1-401a-8a6a-2940b6e9d204", "cidr": "192.168.1.0/24" },
+      "device": null,
+      "createdAt": "2026-10-01T09:12:44.820Z",
+      "startedAt": "2026-10-01T09:12:44.820Z",
+      "finishedAt": "2026-10-01T09:12:45.929Z",
+      "durationMs": 1109,
+      "error": null,
+      "summary": {
+        "devicesFound": 22,
+        "newDevices": 0,
+        "backOnline": 1,
+        "wentOffline": 1,
+        "missingDevices": 2,
+        "knownDevices": 24,
+        "ipChanges": 0,
+        "unresolvedHosts": 0
+      }
+    }
+  ],
+  "error": null,
+  "meta": { "limit": 1, "nextCursor": "75966ed9-3a30-4bf8-8847-f7028d8d16e0" }
+}
+```
+
+| Field        | Meaning                                                                                                                                                                |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`     | The swept subnet (discovery) or the device's address (port scan)                                                                                                       |
+| `device`     | Port scans: the device checked, as it is now (`id`, `ipAddress`, `macAddress`, `hostname`, `displayName`, `vendor`, `deviceType`, `isGateway`); `null` for discoveries |
+| `durationMs` | `null` until the scan has finished                                                                                                                                     |
+| `error`      | `{ code, message }` for failed scans                                                                                                                                   |
+| `summary`    | Once completed: the discovery summary (see `POST /api/devices/discover`) or the port scan summary (see `GET …/ports`); otherwise `null`                                |
+
+Errors: `400 VALIDATION_ERROR` (unknown `type` or `status`, malformed id or cursor, `limit`
+outside 1–100, unknown parameter), `503 DATABASE_UNAVAILABLE`.
+
+### `GET /api/scans/:scanId`
+
+One scan with the settings it ran with, its neighbours in its own history (discoveries of the same
+network, or port scans of the same device, in list order), and, once completed, its results.
+
+```json
+{
+  "success": true,
+  "data": {
+    "scan": {
+      "id": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+      "type": "discovery",
+      "status": "completed",
+      "network": { "id": "5c50d134-…", "cidr": "192.168.1.0/24", "interfaceName": "en0" },
+      "params": {
+        "sweepCidr": "192.168.1.0/24",
+        "interfaceName": "en0",
+        "pingTimeoutMs": 1000,
+        "pingConcurrency": 64,
+        "nmap": "auto"
+      },
+      "summary": { "devicesFound": 22, "missingDevices": 2, "…": "…" },
+      "…": "the fields of a GET /api/scans entry"
+    },
+    "previous": {
+      "id": "5cf01649-6735-4a31-81fe-d3d055f19364",
+      "createdAt": "2026-10-01T03:50:28.344Z"
+    },
+    "next": null,
+    "results": {
+      "found": [
+        {
+          "device": {
+            "id": "8f2c1d3e-…",
+            "hostname": "raspberrypi.lan",
+            "isGateway": false,
+            "isSelf": false,
+            "…": "…"
+          },
+          "ipAddress": "192.168.1.21",
+          "hostname": "raspberrypi.lan",
+          "latencyMs": 4.2,
+          "isNew": false,
+          "backOnline": true,
+          "changes": { "ipAddress": { "from": "192.168.1.20", "to": "192.168.1.21" } }
+        }
+      ],
+      "missing": [
+        {
+          "device": { "id": "0b7e6c1a-…", "hostname": "pixel-8", "status": "offline", "…": "…" },
+          "wentOffline": true,
+          "lastSeenAt": "2026-10-01T03:50:29.704Z",
+          "lastIpAddress": "192.168.1.9"
+        }
+      ]
+    }
+  },
+  "error": null
+}
+```
+
+| Field                  | Meaning                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------- |
+| `results`              | `null` unless `completed`. Discovery: `{ found, missing }`. Port scan: `{ ports }`, as in `GET …/ports`  |
+| `found[].device`       | The device as it is now (as in `GET /api/devices`); the other fields are what this scan saw              |
+| `found[].changes`      | What this scan saw change: `{ field: { from, to } }` for `ipAddress`, `hostname`, `vendor`, `deviceType` |
+| `missing[]`            | Devices known before the scan that it did not find; `wentOffline: false` means already offline before    |
+| `missing[].lastSeenAt` | Last time a scan before this one found the device, and where (`lastIpAddress`)                           |
+| `previous` / `next`    | Older / newer scan of the same network (discovery) or device (port scan); `null` at either end           |
+
+Errors: `400 VALIDATION_ERROR` (malformed `scanId`, any query parameter), `404 NOT_FOUND`
+(`details.scanId`), `503 DATABASE_UNAVAILABLE`.
+
 ## 7. WebSocket
 
 Live events at `ws://<host>:<port>/ws` (`WS_PATH`), on the API's own port. In development the UI
@@ -712,6 +927,7 @@ reconnect (with backoff), then reload state over REST.
 | `GET /api/devices/:deviceId`                   | 6 ✅  | Device details (implemented, see above)                |
 | `GET /api/devices/:deviceId/events`            | 6 ✅  | Device timeline (implemented, see above)               |
 | `GET /api/devices/:deviceId/observations`      | 6 ✅  | Discovery history (implemented, see above)             |
+| `GET /api/devices/:deviceId/history`           | 9 ✅  | Presence history (implemented, see above)              |
 | `POST /api/devices/:deviceId/scan`             | 7 ✅  | Start a port scan (implemented, see above)             |
 | `GET /api/devices/:deviceId/ports`             | 7 ✅  | Port scan status and results (implemented, see above)  |
 | `PATCH /api/devices/:deviceId`                 | later | Edit `displayName`, `notes`, `deviceType`, `isTrusted` |
@@ -719,11 +935,11 @@ reconnect (with backoff), then reload state over REST.
 
 ### `/api/scans`
 
-| Method & path                    | Step | Purpose                         |
-| -------------------------------- | ---- | ------------------------------- |
-| `GET /api/scans/:scanId`         | 9    | Scan status and summary         |
-| `POST /api/scans/:scanId/cancel` | 9    | Cancel a queued or running scan |
-| `GET /api/scans`                 | 9    | Scan history (paginated)        |
+| Method & path                    | Step  | Purpose                                |
+| -------------------------------- | ----- | -------------------------------------- |
+| `GET /api/scans`                 | 9 ✅  | Scan history (implemented, see above)  |
+| `GET /api/scans/:scanId`         | 9 ✅  | One scan and its results (implemented) |
+| `POST /api/scans/:scanId/cancel` | later | Cancel a queued or running scan        |
 
 Port scans are started per device (`POST /api/devices/:deviceId/scan`, Step 7, asynchronous
 `202`). Discovery stays synchronous; other clients follow it through WebSocket events.

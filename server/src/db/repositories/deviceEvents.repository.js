@@ -52,3 +52,41 @@ export async function listDeviceEvents(db, { deviceId, before = null, limit }) {
   );
   return rows;
 }
+
+/**
+ * Everything one discovery scan recorded on device timelines, in the order it happened.
+ * @param {Executor} db
+ * @param {string} scanId
+ */
+export async function listEventsByScan(db, scanId) {
+  const { rows } = await db.query(
+    `SELECT id, device_id, type, ip_address, changes, occurred_at
+     FROM device_events
+     WHERE scan_id = $1
+     ORDER BY occurred_at, id`,
+    [scanId],
+  );
+  return rows;
+}
+
+/**
+ * A device's status events (discovered, online, offline) from `from` on, oldest first, preceded
+ * by the last one before `from`, which gives the status the period starts with.
+ *
+ * @param {Executor} db
+ * @param {{ deviceId: string, from: Date }} options
+ */
+export async function listStatusEvents(db, { deviceId, from }) {
+  const { rows } = await db.query(
+    `(SELECT id, type, occurred_at, scan_id FROM device_events
+      WHERE device_id = $1 AND type IN ('discovered', 'online', 'offline') AND occurred_at < $2
+      ORDER BY occurred_at DESC, id DESC
+      LIMIT 1)
+     UNION ALL
+     (SELECT id, type, occurred_at, scan_id FROM device_events
+      WHERE device_id = $1 AND type IN ('discovered', 'online', 'offline') AND occurred_at >= $2
+      ORDER BY occurred_at, id)`,
+    [deviceId, from],
+  );
+  return rows;
+}

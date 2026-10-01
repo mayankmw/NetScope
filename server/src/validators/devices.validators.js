@@ -38,6 +38,14 @@ export const listDeviceHistorySchemas = {
   }),
 };
 
+/** GET /api/devices/:deviceId/history[?days=30]: presence over the last 1–90 days. */
+export const getDeviceHistorySchemas = {
+  params: deviceParams,
+  query: z.strictObject({
+    days: z.coerce.number().int().min(1).max(90).default(30),
+  }),
+};
+
 /**
  * POST /api/devices/:deviceId/scan takes no input besides the id: the target is the device's
  * known address, and the ports and nmap options are fixed on the server. Any field is rejected.

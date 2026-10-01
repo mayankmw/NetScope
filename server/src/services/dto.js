@@ -73,12 +73,16 @@ export function toObservationDto(row) {
   };
 }
 
+/** Milliseconds between a scan's start and finish; null until it has both. */
+function scanDurationMs(row) {
+  if (!row.started_at || !row.finished_at) return null;
+  return new Date(row.finished_at) - new Date(row.started_at);
+}
+
 /**
  * @param {Record<string, any>} row a port `scans` row
  */
 export function toPortScanDto(row) {
-  const startedAt = row.started_at ? new Date(row.started_at) : null;
-  const finishedAt = row.finished_at ? new Date(row.finished_at) : null;
   return {
     id: row.id,
     status: row.status,
@@ -86,7 +90,42 @@ export function toPortScanDto(row) {
     ipAddress: row.target,
     startedAt: row.started_at,
     finishedAt: row.finished_at ?? null,
-    durationMs: startedAt && finishedAt ? finishedAt - startedAt : null,
+    durationMs: scanDurationMs(row),
+    error: row.error_code ? { code: row.error_code, message: row.error_message } : null,
+    summary: row.summary ?? null,
+  };
+}
+
+/**
+ * A scan of either type, as the scan history lists it.
+ * @param {Record<string, any>} row a `scans` row joined as in scansRepository.listScans
+ */
+export function toScanDto(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    status: row.status,
+    triggeredBy: row.triggered_by,
+    // The swept subnet (discovery) or the device's address (port scan).
+    target: row.target,
+    network: row.network_id ? { id: row.network_id, cidr: row.network_cidr } : null,
+    // Port scans: the device that was checked, as it is now.
+    device: row.target_device_id
+      ? {
+          id: row.target_device_id,
+          ipAddress: row.device_ip_address,
+          macAddress: row.device_mac_address,
+          hostname: row.device_hostname,
+          displayName: row.device_display_name,
+          vendor: row.device_vendor,
+          deviceType: row.device_device_type,
+          isGateway: row.device_is_gateway ?? false,
+        }
+      : null,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at ?? null,
+    durationMs: scanDurationMs(row),
     error: row.error_code ? { code: row.error_code, message: row.error_message } : null,
     summary: row.summary ?? null,
   };

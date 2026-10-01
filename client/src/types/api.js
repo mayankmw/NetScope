@@ -183,12 +183,15 @@
  */
 
 /**
- * @typedef {object} DiscoverySummary
+ * @typedef {object} DiscoverySummary outcome of a completed discovery (also kept on the scan)
  * @property {number} devicesFound
- * @property {number} newDevices
+ * @property {number} newDevices found for the first time
+ * @property {number} backOnline offline before, found again
+ * @property {number} wentOffline online before, not found
+ * @property {number} missingDevices known before the scan, not found by it
+ * @property {number} knownDevices known after the scan (found + missing)
  * @property {number} ipChanges
- * @property {number} wentOffline
- * @property {number} unresolvedHosts
+ * @property {number | null} unresolvedHosts null for scans recorded before Step 9
  */
 
 /**
@@ -199,6 +202,74 @@
  * @property {Record<string, { status: string }>} sources
  * @property {Array<Device & { isNew: boolean, previousIpAddress: string | null }>} devices
  * @property {string[]} unresolvedHosts
+ */
+
+/**
+ * @typedef {object} Scan one entry of the scan history (GET /api/scans)
+ * @property {string} id
+ * @property {'discovery' | 'port'} type
+ * @property {'queued' | 'running' | 'completed' | 'failed' | 'cancelled'} status
+ * @property {'manual' | 'schedule'} triggeredBy
+ * @property {string} target swept subnet (discovery) or the device's address (port scan)
+ * @property {{ id: string, cidr: string, interfaceName?: string } | null} network
+ * @property {{ id: string, ipAddress: string, macAddress: string, hostname: string | null,
+ *             displayName: string | null, vendor: string | null, deviceType: string,
+ *             isGateway: boolean } | null} device port scans: the device checked, as it is now
+ * @property {string} createdAt
+ * @property {string | null} startedAt
+ * @property {string | null} finishedAt
+ * @property {number | null} durationMs
+ * @property {{ code: string, message: string } | null} error
+ * @property {DiscoverySummary | PortScanSummary | null} summary once completed
+ */
+
+/**
+ * @typedef {object} ScanFoundDevice a device a discovery found
+ * @property {Device & { isGateway: boolean, isSelf: boolean }} device as it is now
+ * @property {string} ipAddress where the scan found it
+ * @property {string | null} hostname the name the scan resolved
+ * @property {number | null} latencyMs
+ * @property {boolean} isNew first found by this scan
+ * @property {boolean} backOnline offline before this scan
+ * @property {Record<string, { from: unknown, to: unknown }>} changes what this scan saw change
+ */
+
+/**
+ * @typedef {object} ScanMissingDevice a known device a discovery did not find
+ * @property {Device & { isGateway: boolean, isSelf: boolean }} device as it is now
+ * @property {boolean} wentOffline online until this scan (else already offline)
+ * @property {string | null} lastSeenAt last seen before this scan
+ * @property {string | null} lastIpAddress
+ */
+
+/**
+ * @typedef {object} ScanDetails GET /api/scans/:scanId
+ * @property {Scan & { params: Record<string, unknown> }} scan
+ * @property {{ id: string, createdAt: string } | null} previous older scan of the same network
+ *   (discovery) or device (port scan)
+ * @property {{ id: string, createdAt: string } | null} next
+ * @property {{ found: ScanFoundDevice[], missing: ScanMissingDevice[] }
+ *          | { ports: DevicePort[] } | null} results null until completed
+ */
+
+/**
+ * @typedef {object} PresencePeriod
+ * @property {'online' | 'offline'} status
+ * @property {string} from
+ * @property {string | null} to null: ongoing
+ * @property {string | null} scanId the scan that saw the change (null: began before the range)
+ */
+
+/**
+ * @typedef {object} DeviceHistory GET /api/devices/:deviceId/history
+ * @property {{ from: string, to: string, days: number }} range
+ * @property {string} firstSeenAt
+ * @property {'online' | 'offline'} status
+ * @property {PresencePeriod[]} periods oldest first
+ * @property {{ total: number, seen: number, items: Array<{ id: string, finishedAt: string,
+ *             triggeredBy: 'manual' | 'schedule', seen: boolean, ipAddress: string | null,
+ *             latencyMs: number | null }> }} scans completed discoveries since first seen in the
+ *   range, newest first (at most 100 listed)
  */
 
 export {};

@@ -10,6 +10,7 @@ import { DeviceIdentityCard } from '@/components/device-details/DeviceIdentityCa
 import { DeviceMetadata } from '@/components/device-details/DeviceMetadata';
 import { DeviceNetworkCard } from '@/components/device-details/DeviceNetworkCard';
 import { DevicePorts } from '@/components/device-details/DevicePorts';
+import { DevicePresenceHistory } from '@/components/device-details/DevicePresenceHistory';
 import { DeviceStatus } from '@/components/device-details/DeviceStatus';
 import { Button } from '@/components/ui/button';
 import { useDeviceDetails } from '@/hooks/useDeviceDetails';
@@ -18,12 +19,13 @@ import { useDeviceStore } from '@/stores/useDeviceStore';
 import { backLink } from '@/utils/deviceLinks';
 
 /**
- * One device in detail: status, identity, network, open ports, activity, and metadata. Updates
- * live.
+ * One device in detail: status, identity, network, presence history, open ports, activity, and
+ * metadata. Updates live.
  *
- * Panels are ordered for reading on a phone (status, identity, network, ports, activity,
- * metadata); on wide screens the column wrappers become two columns (`contents` → `flex`):
- * status, ports, activity, and metadata on the left; identity and network on the right.
+ * Panels are ordered for reading on a phone (status, identity, network, presence, ports,
+ * activity, metadata); on wide screens the column wrappers become two columns (`contents` →
+ * `flex`): status, presence, ports, activity, and metadata on the left; identity and network on
+ * the right.
  */
 export function DeviceDetailsPage() {
   const { deviceId } = useParams();
@@ -118,16 +120,22 @@ export function DeviceDetailsPage() {
             highlight={changedAt !== null}
             className="order-1"
           />
-          <DevicePorts device={device} now={now} className="order-4" />
+          <DevicePresenceHistory
+            presence={state.presenceHistory}
+            onRangeChange={state.setPresenceDays}
+            onRetry={state.retryPresence}
+            className="order-4"
+          />
+          <DevicePorts device={device} now={now} className="order-5" />
           <DeviceActivity
             events={state.events}
             observations={state.observations}
             now={now}
             onLoadMore={loadMore}
             onRetry={retryHistory}
-            className="order-5"
+            className="order-6"
           />
-          <DeviceMetadata device={device} network={network} className="order-6" />
+          <DeviceMetadata device={device} network={network} className="order-7" />
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-4">
           <DeviceIdentityCard device={device} className="order-2" />

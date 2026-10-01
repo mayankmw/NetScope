@@ -237,7 +237,7 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     );
 
     // 5. Persist everything atomically: devices, observations, offline marks, each device's
-    //    timeline (device_events), and scan completion.
+    //    timeline (device_events), and scan completion with its outcome (the scan history).
     signal.throwIfAborted();
     const persisted = await withTransaction(async (client) => {
       const saved = [];
@@ -270,11 +270,26 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
         scanId: scan.id,
         events: toDeviceEventRecords(deviceEvents),
       });
-      const completed = await scansRepository.completeScan(client, scan.id);
-      return { saved, wentOffline, deviceEvents, completed };
+      const { known, missing } = await devicesRepository.countKnownAndMissing(client, {
+        networkId: networkRow.id,
+        seenDeviceIds: saved.map((device) => device.id),
+      });
+      const summary = {
+        devicesFound: saved.length,
+        newDevices: saved.filter((device) => device.isNew).length,
+        backOnline: upserted.filter((row) => !row.is_new && row.previous_status === 'offline')
+          .length,
+        wentOffline: wentOffline.length,
+        missingDevices: missing,
+        knownDevices: known,
+        ipChanges: saved.filter((device) => device.previousIpAddress).length,
+        unresolvedHosts: merged.unresolvedHosts.length,
+      };
+      const completed = await scansRepository.completeScan(client, scan.id, { summary });
+      return { saved, deviceEvents, summary, completed };
     });
 
-    const { saved, wentOffline, deviceEvents, completed } = persisted;
+    const { saved, deviceEvents, summary, completed } = persisted;
     for (const device of saved) {
       if (device.isNew) {
         log.info(
@@ -289,13 +304,6 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
       }
     }
 
-    const summary = {
-      devicesFound: saved.length,
-      newDevices: saved.filter((device) => device.isNew).length,
-      ipChanges: saved.filter((device) => device.previousIpAddress).length,
-      wentOffline: wentOffline.length,
-      unresolvedHosts: merged.unresolvedHosts.length,
-    };
     const durationMs = Math.round(performance.now() - startedAt);
     log.info({ durationMs, ...summary }, 'Discovery: completed');
 

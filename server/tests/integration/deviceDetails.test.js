@@ -312,3 +312,83 @@ describe('GET /api/devices/:deviceId/observations', () => {
     });
   });
 });
+
+describe('GET /api/devices/:deviceId/history', () => {
+  it('returns online and offline periods, and which scans saw the device', async () => {
+    const { device, scans } = await seedPi();
+
+    const res = await request(app).get(`/api/devices/${device.id}/history`).expect(200);
+    const { data } = res.body;
+
+    expect(data.range.days).toBe(30);
+    expect(new Date(data.range.to) - new Date(data.range.from)).toBe(30 * 24 * 60 * 60 * 1000);
+    expect(data.status).toBe('online');
+    // Seen at the first scan, missed by the second, back at the third (still online).
+    expect(data.periods).toEqual([
+      { status: 'online', from: expect.any(String), to: expect.any(String), scanId: scans[0].id },
+      { status: 'offline', from: expect.any(String), to: expect.any(String), scanId: scans[1].id },
+      { status: 'online', from: expect.any(String), to: null, scanId: scans[2].id },
+    ]);
+    expect(data.periods[0].to).toBe(data.periods[1].from);
+    expect(data.scans.total).toBe(3);
+    expect(data.scans.seen).toBe(2);
+    expect(data.scans.items).toEqual([
+      {
+        id: scans[2].id,
+        finishedAt: expect.any(String),
+        triggeredBy: 'manual',
+        seen: true,
+        ipAddress: '192.168.1.21',
+        latencyMs: 2,
+      },
+      {
+        id: scans[1].id,
+        finishedAt: expect.any(String),
+        triggeredBy: 'manual',
+        seen: false,
+        ipAddress: null,
+        latencyMs: null,
+      },
+      expect.objectContaining({ id: scans[0].id, seen: true, ipAddress: '192.168.1.20' }),
+    ]);
+  });
+
+  it('starts at the requested range, with the status the device had then', async () => {
+    const { device, scans } = await seedPi();
+    // Move the history back in time: discovered 3 days ago, offline 2 days ago, back 1 hour ago.
+    await query(
+      `UPDATE device_events SET occurred_at = occurred_at - interval '3 days'
+                 WHERE device_id = $1 AND type = 'discovered'`,
+      [device.id],
+    );
+    await query(
+      `UPDATE device_events SET occurred_at = occurred_at - interval '2 days'
+                 WHERE device_id = $1 AND type = 'offline'`,
+      [device.id],
+    );
+
+    const res = await request(app).get(`/api/devices/${device.id}/history?days=1`).expect(200);
+
+    expect(res.body.data.range.days).toBe(1);
+    expect(res.body.data.periods.map((period) => [period.status, period.scanId])).toEqual([
+      ['offline', null],
+      ['online', scans[2].id],
+    ]);
+    expect(res.body.data.periods[0].from).toBe(res.body.data.range.from);
+  });
+
+  it('returns 404 for an unknown device', async () => {
+    const res = await request(app).get(`/api/devices/${UNKNOWN_ID}/history`).expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it.each([
+    ['0 days', '?days=0'],
+    ['more than 90 days', '?days=91'],
+    ['a fractional number of days', '?days=1.5'],
+    ['an unknown parameter', '?from=2026-01-01'],
+  ])('rejects %s', async (_label, search) => {
+    const res = await request(app).get(`/api/devices/${UNKNOWN_ID}/history${search}`).expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+});

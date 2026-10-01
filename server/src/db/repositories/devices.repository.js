@@ -229,3 +229,100 @@ export async function listDeviceObservations(db, { deviceId, before = null, limi
   );
   return rows;
 }
+
+/**
+ * After a discovery's upserts: how many devices the network knows, and how many of them this
+ * scan did not find (known before the scan, not seen by it).
+ *
+ * @param {Executor} db
+ * @param {{ networkId: string, seenDeviceIds: string[] }} options
+ * @returns {Promise<{ known: number, missing: number }>}
+ */
+export async function countKnownAndMissing(db, { networkId, seenDeviceIds }) {
+  const { rows } = await db.query(
+    `SELECT count(*)::int AS known,
+            count(*) FILTER (WHERE NOT (id = ANY ($2::uuid[])))::int AS missing
+     FROM devices
+     WHERE network_id = $1`,
+    [networkId, seenDeviceIds],
+  );
+  return rows[0];
+}
+
+/**
+ * The devices a discovery scan found, ordered by the address it found them at: the device as it
+ * is now (`d.*`, for its name and identity) plus what the scan observed (`observed_*`).
+ *
+ * @param {Executor} db
+ * @param {string} scanId
+ */
+export async function listDevicesFoundByScan(db, scanId) {
+  const { rows } = await db.query(
+    `SELECT d.*, d.mac_address = n.gateway_mac AS is_gateway,
+            o.ip_address AS observed_ip_address, o.hostname AS observed_hostname,
+            o.latency_ms AS observed_latency_ms
+     FROM device_observations o
+     JOIN devices d ON d.id = o.device_id
+     JOIN networks n ON n.id = d.network_id
+     WHERE o.scan_id = $1
+     ORDER BY o.ip_address`,
+    [scanId],
+  );
+  return rows;
+}
+
+/**
+ * The devices a discovery scan did not find although the network knew them (first seen before
+ * the scan started), each with where and when it was last seen before that scan.
+ *
+ * @param {Executor} db
+ * @param {string} scanId
+ */
+export async function listDevicesMissedByScan(db, scanId) {
+  const { rows } = await db.query(
+    `WITH scan AS (SELECT id, network_id, started_at FROM scans WHERE id = $1)
+     SELECT d.*, d.mac_address = n.gateway_mac AS is_gateway,
+            last_seen.observed_at AS last_seen_before_at,
+            last_seen.ip_address AS last_seen_before_ip_address
+     FROM scan
+     JOIN devices d ON d.network_id = scan.network_id AND d.first_seen_at < scan.started_at
+     JOIN networks n ON n.id = d.network_id
+     LEFT JOIN LATERAL (
+       SELECT o.observed_at, o.ip_address FROM device_observations o
+       WHERE o.device_id = d.id AND o.observed_at < scan.started_at
+       ORDER BY o.observed_at DESC, o.id DESC
+       LIMIT 1
+     ) last_seen ON true
+     WHERE NOT EXISTS (
+       SELECT 1 FROM device_observations o WHERE o.scan_id = scan.id AND o.device_id = d.id
+     )
+     ORDER BY d.ip_address`,
+    [scanId],
+  );
+  return rows;
+}
+
+/**
+ * A device's presence in the completed discoveries of its network since `since`, newest first:
+ * whether each scan saw it, and its address and ping time if so. At most `limit` scans; every
+ * row also carries the totals over the whole period (`total_scans`, `total_seen`).
+ *
+ * @param {Executor} db
+ * @param {{ deviceId: string, networkId: string, since: Date, limit: number }} options
+ */
+export async function listPresenceScans(db, { deviceId, networkId, since, limit }) {
+  const { rows } = await db.query(
+    `SELECT s.id, s.finished_at, s.triggered_by,
+            o.id IS NOT NULL AS seen, o.ip_address, o.latency_ms,
+            count(*) OVER ()::int AS total_scans,
+            count(o.id) OVER ()::int AS total_seen
+     FROM scans s
+     LEFT JOIN device_observations o ON o.scan_id = s.id AND o.device_id = $1
+     WHERE s.network_id = $2 AND s.type = 'discovery' AND s.status = 'completed'
+       AND s.finished_at >= $3
+     ORDER BY s.finished_at DESC, s.id DESC
+     LIMIT $4`,
+    [deviceId, networkId, since, limit],
+  );
+  return rows;
+}

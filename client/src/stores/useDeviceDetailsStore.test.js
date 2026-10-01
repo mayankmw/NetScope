@@ -4,6 +4,7 @@ import * as deviceService from '@/services/deviceService';
 import {
   DEVICE_ID,
   makeDeviceDetails,
+  makeDeviceHistory,
   makeObservation,
   makeTimeline,
   NETWORK,
@@ -18,6 +19,7 @@ vi.mock('@/services/deviceService', () => ({
   getDevice: vi.fn(),
   listDeviceEvents: vi.fn(),
   listDeviceObservations: vi.fn(),
+  getDeviceHistory: vi.fn(),
 }));
 
 const store = () => useDeviceDetailsStore.getState();
@@ -40,6 +42,7 @@ beforeEach(() => {
     items: [makeObservation({ id: '2' })],
     nextCursor: '2',
   });
+  deviceService.getDeviceHistory.mockResolvedValue(makeDeviceHistory());
 });
 
 afterEach(() => {
@@ -152,6 +155,58 @@ describe('histories', () => {
     await store().retryHistory('events');
 
     expect(store().events.status).toBe('success');
+    expect(deviceService.getDevice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('presence history', () => {
+  it('loads with the device, for the last 30 days', async () => {
+    await store().open(DEVICE_ID);
+
+    expect(deviceService.getDeviceHistory).toHaveBeenCalledWith(DEVICE_ID, {
+      days: 30,
+      signal: expect.any(AbortSignal),
+    });
+    expect(store().presenceHistory).toMatchObject({ status: 'success', days: 30 });
+    expect(store().presenceHistory.data.periods).toHaveLength(3);
+  });
+
+  it('reloads only the presence when the period changes, and keeps it for the next device', async () => {
+    await store().open(DEVICE_ID);
+    deviceService.getDeviceHistory.mockResolvedValueOnce(
+      makeDeviceHistory({ range: { ...makeDeviceHistory().range, days: 7 } }),
+    );
+
+    const pending = store().setPresenceDays(7);
+    expect(store().presenceHistory).toMatchObject({ status: 'loading', days: 7, data: null });
+    await pending;
+
+    expect(deviceService.getDeviceHistory).toHaveBeenLastCalledWith(DEVICE_ID, {
+      days: 7,
+      signal: expect.any(AbortSignal),
+    });
+    expect(store().presenceHistory.data.range.days).toBe(7);
+    expect(deviceService.getDevice).toHaveBeenCalledTimes(1);
+
+    store().close();
+    await store().open('another-device');
+    expect(deviceService.getDeviceHistory).toHaveBeenLastCalledWith('another-device', {
+      days: 7,
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it('shows an error on its own, and retries it alone', async () => {
+    deviceService.getDeviceHistory.mockRejectedValueOnce(unavailable());
+    await store().open(DEVICE_ID);
+    expect(store().status).toBe('success');
+    expect(store().presenceHistory).toMatchObject({
+      status: 'error',
+      error: { code: 'DATABASE_UNAVAILABLE' },
+    });
+
+    await store().retryPresence();
+    expect(store().presenceHistory.status).toBe('success');
     expect(deviceService.getDevice).toHaveBeenCalledTimes(1);
   });
 });

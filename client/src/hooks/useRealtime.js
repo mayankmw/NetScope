@@ -6,6 +6,8 @@ import { useConnectionStore } from '@/stores/useConnectionStore';
 import { useDeviceDetailsStore } from '@/stores/useDeviceDetailsStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { usePortScanStore } from '@/stores/usePortScanStore';
+import { useScanDetailsStore } from '@/stores/useScanDetailsStore';
+import { useScanHistoryStore } from '@/stores/useScanHistoryStore';
 
 function plural(count, word) {
   return `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -30,9 +32,9 @@ function announcePortScan({ type, data }) {
 
 /**
  * Connects the app to the real-time channel for as long as the shell is mounted:
- * connection status → useConnectionStore, events → useDeviceStore, useDeviceDetailsStore, and
- * usePortScanStore. After a reconnection they are reloaded, since events sent while disconnected
- * are not replayed.
+ * connection status → useConnectionStore, events → useDeviceStore, useDeviceDetailsStore,
+ * usePortScanStore, and the scan history stores. After a reconnection they are reloaded, since
+ * events sent while disconnected are not replayed.
  *
  * A discovery started from another tab or browser is reported with a toast here; this tab's own
  * discoveries are reported by useDiscoverNetwork from the HTTP response. Port scans run in the
@@ -46,6 +48,8 @@ export function useRealtime() {
       if (info.status === 'open' && info.isReconnect) {
         if (devices.status === 'success') devices.fetchDevices();
         useDeviceDetailsStore.getState().refresh();
+        useScanHistoryStore.getState().refresh();
+        useScanDetailsStore.getState().refresh();
       }
     });
 
@@ -58,6 +62,8 @@ export function useRealtime() {
       useDeviceStore.getState().applyEvent(event);
       useDeviceDetailsStore.getState().applyEvent(event);
       usePortScanStore.getState().applyEvent(event);
+      useScanHistoryStore.getState().applyEvent(event);
+      useScanDetailsStore.getState().applyEvent(event);
       announcePortScan(event);
 
       if (isLocalScan) return;

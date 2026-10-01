@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 8 — network topology.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 9 — historical scans.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -75,30 +75,37 @@ netscope/
 │   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, DeviceLink, attributes,
 │   │   │   │                      skeleton
 │   │   │   ├── device-details/    DeviceHeader, DeviceStatus, DeviceIdentityCard,
-│   │   │   │                      DeviceNetworkCard, DevicePorts, DeviceActivity, DeviceMetadata,
-│   │   │   │                      skeleton
+│   │   │   │                      DeviceNetworkCard, DevicePresenceHistory, DevicePorts, PortRow,
+│   │   │   │                      DeviceActivity, DeviceMetadata, skeleton
 │   │   │   ├── network/           NetworkPanel
 │   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
 │   │   │   ├── topology/          TopologyGraph, Toolbar, NodePanel, Legend, List, Controls;
 │   │   │   │                      graphSync, graphStyle, graphLayouts, graphTheme, nodeIcons
+│   │   │   ├── scans/             ScanHistoryList, ScanTrendChart, ScanStatusBadge, ScanLink,
+│   │   │   │                      ScanDetailsHeader, ScanDiscoveryResults, ScanPortResults,
+│   │   │   │                      ScanSettings
 │   │   │   └── alerts/            (10) Alert list
 │   │   ├── config/                env.js — the only reader of import.meta.env
 │   │   ├── constants/             deviceTypes.js (labels for device_types codes)
 │   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
 │   │   │                          useDeviceDetails, useDevicePorts, useOpenDevice, useRealtime,
-│   │   │                          useTopology, useCytoscape, useTopologyGraph, useSystemHealth,
-│   │   │                          useMediaQuery, useNow, useKeyboardShortcut
+│   │   │                          useTopology, useCytoscape, useTopologyGraph, useScanHistory,
+│   │   │                          useScanDetails, useOpenScan, useSystemHealth, useMediaQuery,
+│   │   │                          useNow, useKeyboardShortcut
 │   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
 │   │   ├── lib/                   shadcn `cn` helper
 │   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, TopologyPage,
-│   │   │                          NotFoundPage, RouteErrorPage
-│   │   ├── services/              apiClient, deviceService, healthService, realtimeClient
+│   │   │                          ScansPage, ScanDetailsPage, NotFoundPage, RouteErrorPage
+│   │   ├── services/              apiClient, deviceService, scanService, healthService,
+│   │   │                          realtimeClient
 │   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, usePortScanStore,
-│   │   │                          useConnectionStore, useSystemStore, useUiStore (Zustand)
+│   │   │                          useScanHistoryStore, useScanDetailsStore, useConnectionStore,
+│   │   │                          useSystemStore, useUiStore (Zustand)
 │   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
 │   │   ├── types/                 JSDoc typedefs for API contracts
 │   │   ├── utils/                 deviceFilters (search/filter/sort/URL), deviceActivity (timeline
-│   │   │                          text), deviceLinks, format, ids, ip, mac, portScan, topology
+│   │   │                          text), deviceLinks, format, ids, ip, mac, portScan, topology,
+│   │   │                          scans (filters/URL, page merge), presence (bar segments, stats)
 │   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
@@ -119,7 +126,7 @@ netscope/
 │   │   ├── errors/                AppError + stable error codes
 │   │   ├── db/                    pool.js, errors.js, migrator.js, migrate.js (CLI), migrations/; repositories/ (3)
 │   │   ├── network/               Discovery + diagnostics (see §5, DISCOVERY.md)
-│   │   ├── jobs/                  (9) In-process scan job runner (scheduled scans)
+│   │   ├── jobs/                  (later) In-process scan job runner (scheduled scans)
 │   │   ├── events/                eventBus: in-process publish/subscribe of domain events
 │   │   ├── websocket/             wsManager (connections, heartbeat, broadcast), messages
 │   │   ├── utils/                 logger, apiResponse
@@ -313,7 +320,7 @@ Scan states: `queued → running → completed | failed | cancelled`. Runs are i
 single-host app with at most one scan at a time. The database (one active scan, a partial unique
 index) is the authority; an in-process slot refuses a concurrent request immediately. On startup,
 scans left running by a previous process are marked failed; on shutdown, a running scan is
-cancelled and recorded before the database pool closes. Scheduled scans (Step 9) reuse this.
+cancelled and recorded before the database pool closes. Scheduled scans (planned) will reuse this.
 
 ### 5.5 Platform support
 
@@ -345,13 +352,14 @@ discovery.service ──publish──▶ eventBus ──▶ wsManager ──broa
 
 **Why the discover endpoint stays synchronous.** The tab that starts a scan gets its result in
 the HTTP response; all other tabs follow along through events. Events are purely additive, so if
-the socket is down the app still works and catches up on reconnect. Asynchronous (202) runs come
-with the job runner and scheduled scans in Step 9.
+the socket is down the app still works and catches up on reconnect. Asynchronous (202) runs would
+come with a job runner, if scheduled scans are added.
 
 **Client side.** `services/realtimeClient.js` owns the single connection (backoff, watchdog,
 dedupe) and knows nothing about React. `hooks/useRealtime.js`, mounted once in `AppLayout`,
 routes its status to `useConnectionStore` (top-bar "Live" indicator) and its events to the
-stores' `applyEvent` (`useDeviceStore`, `useDeviceDetailsStore`, `usePortScanStore`). Rows changed
+stores' `applyEvent` (`useDeviceStore`, `useDeviceDetailsStore`, `usePortScanStore`,
+`useScanHistoryStore`, `useScanDetailsStore`). Rows changed
 by an event get a brief highlight. Port scans (`portscan.*`) run in the background, so the tab that
 started one announces its outcome with a toast.
 
@@ -377,16 +385,18 @@ Imports use the `@/` alias (`@/services/apiClient`).
 
 ### 7.2 State strategy
 
-| Kind of state                        | Where it lives                                                                |
-| ------------------------------------ | ----------------------------------------------------------------------------- |
-| Ephemeral UI (menu open, input text) | Component `useState`                                                          |
-| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`   |
-| The device on the details page       | `useDeviceDetailsStore`: details, timeline, and discovery history pages       |
-| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)              |
-| Port scans                           | `usePortScanStore`: the scan running anywhere, and each viewed device's ports |
-| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard         |
-| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)        |
-| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable  |
+| Kind of state                        | Where it lives                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Ephemeral UI (menu open, input text) | Component `useState`                                                                     |
+| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`              |
+| The device on the details page       | `useDeviceDetailsStore`: details, timeline and discovery history pages, presence history |
+| Scan history list                    | `useScanHistoryStore`: one filtered list (filters in the URL), cursor pages              |
+| The scan on the scan details page    | `useScanDetailsStore`: one scan and its results                                          |
+| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)                         |
+| Port scans                           | `usePortScanStore`: the scan running anywhere, and each viewed device's ports            |
+| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard                    |
+| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)                   |
+| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable             |
 
 Data flow: **component → hook → store action → service → apiClient**. Components never call
 services or `fetch`. Stores expose actions (`fetchDevices`, `discoverNetwork`, `checkHealth`);
@@ -411,7 +421,13 @@ selectors to limit re-renders.
   server's one-scan rule. A scan's end reloads that device's ports over REST; without a live
   connection, `useDevicePorts` polls every 3 s while its device is being scanned.
 
-Planned stores: `useScanStore`, `useAlertStore` (Steps 9–10). TanStack Query
+- `useScanHistoryStore` and `useScanDetailsStore` follow the same pattern: a scan starting,
+  finishing, or failing (`discovery.*`, `portscan.*`) schedules one reload shortly after; the
+  history merges the fresh first page over the loaded pages (fresh copies replace rows, so a
+  running scan turns completed in place). The presence history lives in `useDeviceDetailsStore`
+  and refreshes with the device; changing its range reloads only it.
+
+Planned stores: `useAlertStore` (Step 10). TanStack Query
 is deliberately not used: most data will arrive by server push into shared entity state, and
 Zustand covers both push and fetch with one model.
 
@@ -442,6 +458,10 @@ Zustand covers both push and fetch with one model.
   (`useCytoscape`, lazy-loaded), updated by diff (`useTopologyGraph`): status changes restyle,
   structure changes re-run a computed (preset) layout. A list view presents the same structure
   accessibly. Details: [TOPOLOGY.md](TOPOLOGY.md).
+- **Scan history** _(Step 9)_ — read-only views over the records every scan already writes; each
+  discovery stores its outcome counts on its scan row, so lists never aggregate. Charts are plain
+  elements (no chart library): a column per scan, and a presence bar built from status periods.
+  Details: [SCAN_HISTORY.md](SCAN_HISTORY.md).
 
 ## 8. UI structure
 
@@ -451,10 +471,10 @@ Zustand covers both push and fetch with one model.
 | -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------ |
 | `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
 | `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
-| `/devices/:deviceId` | `DeviceDetailsPage` | 6–7   | Status, identity, network, open ports (scan), activity, metadata                           |
+| `/devices/:deviceId` | `DeviceDetailsPage` | 6–9   | Status, identity, network, presence history, open ports (scan), activity, metadata         |
 | `/topology`          | `TopologyPage`      | 8     | Logical network graph: gateway → devices; search, layouts, list view, live                 |
-| `/scans`             | `ScansPage`         | 9     | Scan history                                                                               |
-| `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found / changed                                                                |
+| `/scans`             | `ScansPage`         | 9     | Scan history: network / port scans, status filter, trend chart (`?type=&status=&device=`)  |
+| `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found, missed, and changed; ports; settings; older / newer                     |
 | `/alerts`            | `AlertsPage`        | 10    | Alert inbox with acknowledge                                                               |
 | `/reports`           | `ReportsPage`       | 11    | Export inventory and scan results                                                          |
 | `/settings`          | `SettingsPage`      | later | Scan schedule, retention, preferences                                                      |
@@ -488,7 +508,7 @@ Each widget appears in the step that produces its data:
 | Live indicator, Recent activity        | WebSocket events                                                         | 5     |
 | Network health                         | Gateway reachability, latency, and packet loss (formula defined in-step) | 5     |
 | Topology preview                       | Device inventory (`buildTopologyModel`)                                  | later |
-| Last scan summary                      | `GET /api/scans?limit=1`                                                 | 9     |
+| Last scan summary                      | `GET /api/scans?limit=1`                                                 | later |
 | Recent alerts                          | `GET /api/alerts`, `alert.created` events                                | 10    |
 
 Every data view implements **loading, empty, error, and populated** states, and works at mobile
@@ -621,9 +641,12 @@ defaults for later steps are proposals, finalized in their step.
 | 15  | Vitest everywhere                              | One runner and API for server and client.                                                                                                                                     | —                                                                        |
 | 16  | Device timeline as a stored event log          | `device_events` is written in the discovery transaction from the same facts as the WebSocket events. Deriving status changes from scans would duplicate offline rules in SQL. | —                                                                        |
 | 17  | Cursor pagination for device histories         | Append-only, newest-first lists that grow while being read: a `before` cursor never skips or repeats entries, unlike page numbers, and needs no `COUNT`.                      | —                                                                        |
-| 18  | Port scans asynchronous (202), discovery not   | A port scan outlives a comfortable request, and its "scanning" state must survive reloads and show in every tab. Discovery's caller wants the result inline.                  | Scheduled scans (Step 9) may move discovery to the same model.           |
+| 18  | Port scans asynchronous (202), discovery not   | A port scan outlives a comfortable request, and its "scanning" state must survive reloads and show in every tab. Discovery's caller wants the result inline.                  | Scheduled scans may move discovery to the same model.                    |
 | 19  | Fixed port profile in code, not configurable   | The list is the safety boundary: auditable in one file, identical everywhere, impossible to widen from the API or a misconfigured `.env`.                                     | Users need site-specific ports (then: an allowlisted, capped variable).  |
 | 20  | Verify the target's MAC before and after       | DHCP reuses addresses: scanning a device's last known IP could hit another machine. The ARP cache confirms who answered; mismatched results are discarded.                    | —                                                                        |
 | 21  | Topology built client-side, no endpoint        | The inventory already holds everything and is kept live by WebSocket events; a server model would duplicate data and the live-update path.                                    | Real link data (LLDP/SNMP) exists.                                       |
 | 22  | Logical edges only (gateway → device)          | Discovery cannot see switches, access points, or Wi-Fi associations; drawing them would be invention. Edges are typed `logical` and drawn dashed.                             | Physical topology data becomes available.                                |
 | 23  | Computed layouts, no physics                   | Radial and tree positions are O(n), deterministic, and stable across updates; force-directed layouts are O(n²) and reshuffle on every change.                                 | —                                                                        |
+| 24  | Discovery outcome stored on the scan row       | Lists read one snapshot per scan instead of aggregating observations, and keep what the scan reported even if devices change later. Back-filled for older scans.              | Counts need to be recomputed after device merges.                        |
+| 25  | Presence periods from status events            | `device_events` already holds every status change with its scan; periods are a pure function of it. Re-deriving status from observations would duplicate the offline rules.   | —                                                                        |
+| 26  | Scan history pages use a keyset cursor         | Same reason as #17: the history grows while being read. `(created_at, id)` with a matching index per filter keeps every page a range scan.                                    | —                                                                        |

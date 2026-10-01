@@ -82,3 +82,14 @@ export function formatPercent(part, whole) {
   const percent = (part / whole) * 100;
   return `${part < whole ? Math.min(99, Math.round(percent)) : Math.round(percent)}%`;
 }
+
+/**
+ * How long something took, precise for short runs: "850 ms", "1.2 s", "48 s", "2m 5s".
+ * @param {number} ms
+ */
+export function formatElapsed(ms) {
+  if (ms < 1_000) return `${Math.max(0, Math.round(ms))} ms`;
+  if (ms < 10_000) return `${(ms / 1_000).toFixed(1)} s`;
+  if (ms < 60_000) return `${Math.round(ms / 1_000)} s`;
+  return formatDuration(ms / 1_000);
+}
