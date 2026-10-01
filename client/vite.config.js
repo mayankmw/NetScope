@@ -44,8 +44,13 @@ export default defineConfig(({ mode }) => {
         output: {
           // Third-party code in its own chunk: it changes far less often than app code, so
           // browsers keep it cached across NetScope updates. Pages are split per route.
+          // The graph libraries (Cytoscape, ~400 kB) form a separate chunk, loaded only by the
+          // topology page; otherwise the vendor group would load them on every page.
           codeSplitting: {
-            groups: [{ name: 'vendor', test: /node_modules/ }],
+            groups: [
+              { name: 'graph', test: /node_modules[\\/](cytoscape|lucide)[\\/]/, priority: 2 },
+              { name: 'vendor', test: /node_modules/, priority: 1 },
+            ],
           },
         },
       },

@@ -17,6 +17,8 @@
     "@netscope/shared": "^0.1.0",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
+    "cytoscape": "^3.34.3",
+    "lucide": "^1.48.0",
     "lucide-react": "^1.48.0",
     "motion": "^13.4.6",
     "radix-ui": "^1.6.7",

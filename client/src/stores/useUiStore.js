@@ -32,6 +32,12 @@ export const useUiStore = create(
     (set) => ({
       sidebarCollapsed: false,
       toggleSidebar: () => set((state) => ({ sidebarCollapsed: !state.sidebarCollapsed })),
+
+      /** @type {'radial' | 'tree'} */
+      topologyLayout: 'radial',
+      topologyShowOffline: true,
+      setTopologyLayout: (topologyLayout) => set({ topologyLayout }),
+      setTopologyShowOffline: (topologyShowOffline) => set({ topologyShowOffline }),
     }),
     {
       name: 'netscope:ui',

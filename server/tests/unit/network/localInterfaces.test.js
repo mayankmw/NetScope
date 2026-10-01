@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findLocalInterface } from '../../../src/network/localInterfaces.js';
+import { findLocalInterface, listLocalMacAddresses } from '../../../src/network/localInterfaces.js';
 
 const INTERFACES = {
   lo0: [
@@ -56,5 +56,11 @@ describe('findLocalInterface', () => {
 
   it('never matches internal interfaces', () => {
     expect(findLocalInterface('00:00:00:00:00:00', () => ({ lo0: INTERFACES.lo0 }))).toBeNull();
+  });
+});
+
+describe('listLocalMacAddresses', () => {
+  it("lists this machine's interface MACs, normalized, without loopback or placeholder MACs", () => {
+    expect(listLocalMacAddresses(() => INTERFACES)).toEqual(new Set(['c6:33:ee:e5:75:c3']));
   });
 });

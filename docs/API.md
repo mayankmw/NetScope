@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 7.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), and the WebSocket event stream are implemented. Everything else is the plan, and
+> Status: **Step 8.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -168,6 +168,8 @@ selects another. Before the first discovery, `network` is `null` and `devices` i
 
 The whole inventory is returned at once: sweeps are capped at a /22, so a network holds at most
 ~1,000 devices, and the client filters and sorts in memory. Unknown query parameters are rejected.
+`isGateway` marks the network's gateway; `isSelf` the machine NetScope runs on (its MAC belongs to
+one of the server's interfaces). The topology page is built from this response.
 
 ```json
 {
@@ -200,8 +202,10 @@ The whole inventory is returned at once: sweeps are capped at a /22, so a networ
         "isTrusted": false,
         "status": "online",
         "isGateway": false,
+        "isSelf": false,
         "firstSeenAt": "2026-09-20T08:12:03.114Z",
-        "lastSeenAt": "2026-09-30T13:34:45.929Z"
+        "lastSeenAt": "2026-09-30T13:34:45.929Z",
+        "updatedAt": "2026-09-30T13:34:45.929Z"
       }
     ]
   },
@@ -644,7 +648,7 @@ contract changes. Unknown `type`s must be ignored by clients.
 | `portscan.completed`  | A port scan finished and its results are committed      | `scanId`, `deviceId`, `networkId`, `finishedAt`, `durationMs`, `summary`                                                                                                                            |
 | `portscan.failed`     | A started port scan failed, timed out, or was cancelled | `scanId`, `deviceId`, `networkId`, `error: { code, message }`                                                                                                                                       |
 
-`device` has the same shape as in `GET /api/devices` (including `isGateway` and `updatedAt`).
+`device` has the same shape as in `GET /api/devices` (including `isGateway`, `isSelf`, and `updatedAt`).
 A device seen again with no change produces no device event: `discovery.completed.seenDeviceIds`
 lists every device seen, whose `lastSeenAt` is `finishedAt`.
 
@@ -726,11 +730,11 @@ Port scans are started per device (`POST /api/devices/:deviceId/scan`, Step 7, a
 
 ### `/api/network`
 
-| Method & path               | Step | Purpose                                                  |
-| --------------------------- | ---- | -------------------------------------------------------- |
-| `GET /api/network`          | 4    | Current network: interface, CIDR, gateway                |
-| `GET /api/network/overview` | 4–5  | Dashboard counts (total, online, new) and network health |
-| `GET /api/network/topology` | 8    | Nodes and edges for the topology view                    |
+| Method & path               | Step | Purpose                                                                                              |
+| --------------------------- | ---- | ---------------------------------------------------------------------------------------------------- |
+| `GET /api/network`          | 4    | Current network: interface, CIDR, gateway                                                            |
+| `GET /api/network/overview` | 4–5  | Dashboard counts (total, online, new) and network health                                             |
+| `GET /api/network/topology` | —    | Not needed: the topology is built in the client from `GET /api/devices` ([TOPOLOGY.md](TOPOLOGY.md)) |
 
 ### `/api/alerts` _(Step 10)_
 

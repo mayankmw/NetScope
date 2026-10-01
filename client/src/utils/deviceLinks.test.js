@@ -19,6 +19,7 @@ describe('backLink', () => {
       label: 'Devices',
     });
     expect(backLink('/')).toEqual({ to: '/', label: 'Overview' });
+    expect(backLink('/topology')).toEqual({ to: '/topology', label: 'Topology' });
   });
 
   it.each([undefined, 'https://example.com', '//example.com/devices', 42])(

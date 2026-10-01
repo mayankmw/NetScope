@@ -22,12 +22,23 @@ const TRACKED_FIELDS = [
  * @param {object} input
  * @param {string} input.networkId
  * @param {string | null} input.gatewayMac
+ * @param {string | null} [input.selfMac] this machine's MAC on the scanned interface
  * @param {Array<Record<string, any>>} input.upserted rows from upsertDiscoveredDevice
  * @param {Array<Record<string, any>>} input.wentOffline rows from markUnseenDevicesOffline
  * @returns {Array<{ type: string, data: object }>}
  */
-export function deriveDeviceEvents({ networkId, gatewayMac, upserted, wentOffline }) {
-  const toDevice = (row) => ({ ...toDeviceDto(row), isGateway: row.mac_address === gatewayMac });
+export function deriveDeviceEvents({
+  networkId,
+  gatewayMac,
+  selfMac = null,
+  upserted,
+  wentOffline,
+}) {
+  const toDevice = (row) => ({
+    ...toDeviceDto(row),
+    isGateway: row.mac_address === gatewayMac,
+    isSelf: row.mac_address === selfMac,
+  });
   const events = [];
 
   for (const row of upserted) {

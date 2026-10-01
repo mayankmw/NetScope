@@ -123,6 +123,18 @@ describe('deriveDeviceEvents', () => {
     ).toEqual([EventTypes.DEVICE_ONLINE, EventTypes.DEVICE_UPDATED]);
   });
 
+  it('flags the machine NetScope runs on', () => {
+    const [event] = deriveDeviceEvents({
+      networkId: 'n1',
+      gatewayMac: GATEWAY,
+      selfMac: 'b8:27:eb:12:34:56',
+      upserted: [row({ is_new: true, previous_ip_address: null, previous_status: null })],
+      wentOffline: [],
+    });
+
+    expect(event.data.device).toMatchObject({ isSelf: true, isGateway: false });
+  });
+
   it('reports devices that went offline, flagging the gateway', () => {
     const events = derive([], [row({ id: 'gw', mac_address: GATEWAY, status: 'offline' })]);
 

@@ -25,9 +25,9 @@ function deviceNotFound(deviceId) {
  * @param {{ networkId?: string }} [options]
  */
 export async function listDevices({ networkId } = {}) {
-  const network = await networksRepository.findNetwork(db, { networkId });
+  const networkRow = await networksRepository.findNetwork(db, { networkId });
 
-  if (!network) {
+  if (!networkRow) {
     if (networkId) {
       throw new AppError('Network not found.', {
         statusCode: 404,
@@ -38,10 +38,16 @@ export async function listDevices({ networkId } = {}) {
     return { network: null, devices: [] };
   }
 
-  const rows = await devicesRepository.listDevicesByNetwork(db, network.id);
+  const rows = await devicesRepository.listDevicesByNetwork(db, networkRow.id);
+  const localMacs = network.listLocalMacAddresses();
   return {
-    network: toNetworkDto(network),
-    devices: rows.map((row) => ({ ...toDeviceDto(row), isGateway: row.is_gateway })),
+    network: toNetworkDto(networkRow),
+    devices: rows.map((row) => ({
+      ...toDeviceDto(row),
+      isGateway: row.is_gateway,
+      // The machine NetScope runs on (its MAC belongs to one of this machine's interfaces).
+      isSelf: localMacs.has(row.mac_address),
+    })),
   };
 }
 

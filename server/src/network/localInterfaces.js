@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { normalizeMac } from './mac.js';
+import { isDeviceMac, normalizeMac } from './mac.js';
 
 /**
  * @typedef {object} LocalInterface
@@ -34,4 +34,22 @@ export function findLocalInterface(macAddress, listInterfaces = os.networkInterf
     };
   }
   return null;
+}
+
+/**
+ * MAC addresses of this machine's network interfaces, to recognize it among discovered devices.
+ * Reads the OS interface list only; runs no commands.
+ *
+ * @param {() => ReturnType<typeof os.networkInterfaces>} [listInterfaces] for tests
+ * @returns {Set<string>} normalized MACs
+ */
+export function listLocalMacAddresses(listInterfaces = os.networkInterfaces) {
+  const macs = new Set();
+  for (const addresses of Object.values(listInterfaces())) {
+    for (const address of addresses ?? []) {
+      const mac = normalizeMac(address.mac);
+      if (!address.internal && isDeviceMac(mac)) macs.add(mac);
+    }
+  }
+  return macs;
 }

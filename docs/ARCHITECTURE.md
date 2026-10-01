@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 7 — safe port scanning.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 8 — network topology.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -79,25 +79,26 @@ netscope/
 │   │   │   │                      skeleton
 │   │   │   ├── network/           NetworkPanel
 │   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
-│   │   │   ├── topology/          (8) Cytoscape graph wrapper
+│   │   │   ├── topology/          TopologyGraph, Toolbar, NodePanel, Legend, List, Controls;
+│   │   │   │                      graphSync, graphStyle, graphLayouts, graphTheme, nodeIcons
 │   │   │   └── alerts/            (10) Alert list
 │   │   ├── config/                env.js — the only reader of import.meta.env
 │   │   ├── constants/             deviceTypes.js (labels for device_types codes)
 │   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
 │   │   │                          useDeviceDetails, useDevicePorts, useOpenDevice, useRealtime,
-│   │   │                          useSystemHealth,
+│   │   │                          useTopology, useCytoscape, useTopologyGraph, useSystemHealth,
 │   │   │                          useMediaQuery, useNow, useKeyboardShortcut
 │   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
 │   │   ├── lib/                   shadcn `cn` helper
-│   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, NotFoundPage,
-│   │   │                          RouteErrorPage
+│   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, TopologyPage,
+│   │   │                          NotFoundPage, RouteErrorPage
 │   │   ├── services/              apiClient, deviceService, healthService, realtimeClient
 │   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, usePortScanStore,
 │   │   │                          useConnectionStore, useSystemStore, useUiStore (Zustand)
 │   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
 │   │   ├── types/                 JSDoc typedefs for API contracts
 │   │   ├── utils/                 deviceFilters (search/filter/sort/URL), deviceActivity (timeline
-│   │   │                          text), deviceLinks, format, ids, ip, mac, portScan
+│   │   │                          text), deviceLinks, format, ids, ip, mac, portScan, topology
 │   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
@@ -436,8 +437,11 @@ Zustand covers both push and fetch with one model.
 - **Accessibility** — semantic table with `aria-sort`, radio-group status filter with arrow keys,
   labelled icon buttons, visible focus rings, "/" focuses search, Escape clears it, missing
   values read as "Unknown".
-- **Topology** _(Step 8)_ — a `TopologyGraph` component owns a Cytoscape instance imperatively
-  (ref + effect) and applies incremental diffs rather than re-creating the graph on each update.
+- **Topology** _(Step 8)_ — a logical topology (gateway → devices) built in the browser from the
+  device inventory by a pure function, drawn with Cytoscape. One instance per mount
+  (`useCytoscape`, lazy-loaded), updated by diff (`useTopologyGraph`): status changes restyle,
+  structure changes re-run a computed (preset) layout. A list view presents the same structure
+  accessibly. Details: [TOPOLOGY.md](TOPOLOGY.md).
 
 ## 8. UI structure
 
@@ -448,7 +452,7 @@ Zustand covers both push and fetch with one model.
 | `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
 | `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
 | `/devices/:deviceId` | `DeviceDetailsPage` | 6–7   | Status, identity, network, open ports (scan), activity, metadata                           |
-| `/topology`          | `TopologyPage`      | 8     | Interactive network map                                                                    |
+| `/topology`          | `TopologyPage`      | 8     | Logical network graph: gateway → devices; search, layouts, list view, live                 |
 | `/scans`             | `ScansPage`         | 9     | Scan history                                                                               |
 | `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found / changed                                                                |
 | `/alerts`            | `AlertsPage`        | 10    | Alert inbox with acknowledge                                                               |
@@ -477,15 +481,15 @@ Zustand covers both push and fetch with one model.
 
 Each widget appears in the step that produces its data:
 
-| Widget                                 | Data source                                                              | Step |
-| -------------------------------------- | ------------------------------------------------------------------------ | ---- |
-| Network overview (name, CIDR, gateway) | `GET /api/network`                                                       | 3–4  |
-| Device count / Online / New devices    | `GET /api/network/overview`, device store                                | 4    |
-| Live indicator, Recent activity        | WebSocket events                                                         | 5    |
-| Network health                         | Gateway reachability, latency, and packet loss (formula defined in-step) | 5    |
-| Topology preview                       | `GET /api/network/topology`                                              | 8    |
-| Last scan summary                      | `GET /api/scans?limit=1`                                                 | 9    |
-| Recent alerts                          | `GET /api/alerts`, `alert.created` events                                | 10   |
+| Widget                                 | Data source                                                              | Step  |
+| -------------------------------------- | ------------------------------------------------------------------------ | ----- |
+| Network overview (name, CIDR, gateway) | `GET /api/network`                                                       | 3–4   |
+| Device count / Online / New devices    | `GET /api/network/overview`, device store                                | 4     |
+| Live indicator, Recent activity        | WebSocket events                                                         | 5     |
+| Network health                         | Gateway reachability, latency, and packet loss (formula defined in-step) | 5     |
+| Topology preview                       | Device inventory (`buildTopologyModel`)                                  | later |
+| Last scan summary                      | `GET /api/scans?limit=1`                                                 | 9     |
+| Recent alerts                          | `GET /api/alerts`, `alert.created` events                                | 10    |
 
 Every data view implements **loading, empty, error, and populated** states, and works at mobile
 widths (the sidebar collapses to a sheet).
@@ -586,14 +590,15 @@ defaults for later steps are proposals, finalized in their step.
 | `@fontsource-variable/geist-mono` _(Step 4)_               | client       | Self-hosted monospace font for IPs and MACs.                                   |
 | `vitest`, `jsdom` (29), `@testing-library/*` _(Step 4)_    | client (dev) | Component and store tests. jsdom 29 is the newest that supports Node 22.13.    |
 | `ws` _(Step 5)_                                            | server       | WebSocket server (and the client in server tests).                             |
+| `express-rate-limit` _(Step 7)_                            | server       | Rate limits on endpoints that start scans.                                     |
+| `cytoscape` _(Step 8)_                                     | client       | Graph rendering for the topology view (own lazy-loaded chunk).                 |
+| `lucide` _(Step 8)_                                        | client       | Framework-free icon data, to draw device icons inside graph nodes.             |
 
 ### Added in later steps
 
 | Package / tool         | Step             | Why                                                                             |
 | ---------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `express-rate-limit`   | 7                | Throttle scan-triggering endpoints.                                             |
 | `nmap` (system binary) | 3 (optional) / 7 | Host discovery and TCP connect scans. `brew install nmap` / `apt install nmap`. |
-| `cytoscape`            | 8                | Graph rendering for the topology view.                                          |
 
 ## 11. Decision log
 
@@ -619,3 +624,6 @@ defaults for later steps are proposals, finalized in their step.
 | 18  | Port scans asynchronous (202), discovery not   | A port scan outlives a comfortable request, and its "scanning" state must survive reloads and show in every tab. Discovery's caller wants the result inline.                  | Scheduled scans (Step 9) may move discovery to the same model.           |
 | 19  | Fixed port profile in code, not configurable   | The list is the safety boundary: auditable in one file, identical everywhere, impossible to widen from the API or a misconfigured `.env`.                                     | Users need site-specific ports (then: an allowlisted, capped variable).  |
 | 20  | Verify the target's MAC before and after       | DHCP reuses addresses: scanning a device's last known IP could hit another machine. The ARP cache confirms who answered; mismatched results are discarded.                    | —                                                                        |
+| 21  | Topology built client-side, no endpoint        | The inventory already holds everything and is kept live by WebSocket events; a server model would duplicate data and the live-update path.                                    | Real link data (LLDP/SNMP) exists.                                       |
+| 22  | Logical edges only (gateway → device)          | Discovery cannot see switches, access points, or Wi-Fi associations; drawing them would be invention. Edges are typed `logical` and drawn dashed.                             | Physical topology data becomes available.                                |
+| 23  | Computed layouts, no physics                   | Radial and tree positions are O(n), deterministic, and stable across updates; force-directed layouts are O(n²) and reshuffle on every change.                                 | —                                                                        |

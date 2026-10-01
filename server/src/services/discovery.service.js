@@ -262,6 +262,7 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
       const deviceEvents = deriveDeviceEvents({
         networkId: networkRow.id,
         gatewayMac: detected.gatewayMac,
+        selfMac: detected.localMac,
         upserted,
         wentOffline,
       });

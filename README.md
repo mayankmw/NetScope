@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 7 of 12 — safe port scanning. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 8 of 12 — network topology. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -26,7 +26,7 @@ Details: [Architecture §5 — Network layer and safety model](docs/ARCHITECTURE
 - Live device list and dashboard (WebSocket updates)
 - Device details: identity, network, presence, activity timeline, and discovery history
 - Safe port scans of a single known device (fixed TCP connect profile, service detection)
-- Interactive network topology
+- Interactive logical network topology (gateway → devices), live
 - Scan history and device presence timeline
 - New-device and change alerts
 - CSV / JSON report export
@@ -138,6 +138,13 @@ network this computer is on can be scanned, one scan at a time, with a fixed, no
 profile: ordinary connections, no login attempts, exploits, or OS fingerprinting. Needs nmap.
 Details: [docs/PORT_SCANNING.md](docs/PORT_SCANNING.md).
 
+**Topology** draws the network as an interactive graph: the gateway, and every device around it,
+shaped by kind (computer, phone, smart home, network gear) and styled by state (online, offline,
+this computer, new). Pan, zoom, search, switch between a radial and a tree layout, select a device
+for its details, or double-click to open it. It is a **logical** topology: a line means "on the
+gateway's subnet", not a cable or a Wi-Fi link, which NetScope cannot see. A list view shows the
+same structure for keyboard and screen-reader use. Details: [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
+
 From the command line:
 
 ```bash
@@ -205,7 +212,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 5. ✅ Live WebSocket updates
 6. ✅ Device details
 7. ✅ Safe port scanning
-8. Network topology visualization
+8. ✅ Network topology visualization
 9. Historical scans
 10. New-device alerts
 11. Report export

@@ -8,7 +8,7 @@ export { NetworkError, NetworkErrorCodes } from './errors.js';
 export { isToolAvailable } from './exec/tools.js';
 export { getPlatform } from './platform/index.js';
 export { detectNetwork } from './networkDetection.js';
-export { findLocalInterface } from './localInterfaces.js';
+export { findLocalInterface, listLocalMacAddresses } from './localInterfaces.js';
 export { pingSweep } from './discovery/pingSweep.js';
 export { nmapHostDiscovery } from './discovery/nmapDiscovery.js';
 export { nmapPortScan, portScanArgs } from './portscan/nmapPortScan.js';

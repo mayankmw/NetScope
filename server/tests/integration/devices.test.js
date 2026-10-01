@@ -74,6 +74,7 @@ describe('GET /api/devices', () => {
       isTrusted: false,
       status: 'online',
       isGateway: false,
+      isSelf: false,
       firstSeenAt: expect.any(String),
       lastSeenAt: expect.any(String),
       updatedAt: expect.any(String),
