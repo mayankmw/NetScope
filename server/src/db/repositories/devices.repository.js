@@ -10,6 +10,8 @@
  * - User-owned fields (display_name, notes, is_trusted) are never touched.
  * - first_seen_at is set only on insert; last_seen_at moves to now().
  *
+ * Also returns the row's previous values (previous_*), so callers can tell exactly what changed.
+ *
  * @param {Executor} db
  * @param {string} networkId
  * @param {import('../../network/discovery/normalizeDevices.js').DiscoveredDevice} device
@@ -17,7 +19,8 @@
 export async function upsertDiscoveredDevice(db, networkId, device) {
   const { rows } = await db.query(
     `WITH previous AS (
-       SELECT ip_address FROM devices WHERE network_id = $1 AND mac_address = $2
+       SELECT ip_address, hostname, vendor, device_type, status
+       FROM devices WHERE network_id = $1 AND mac_address = $2
      ),
      upserted AS (
        INSERT INTO devices (network_id, mac_address, ip_address, hostname, vendor, device_type, status)
@@ -33,7 +36,11 @@ export async function upsertDiscoveredDevice(db, networkId, device) {
        RETURNING *
      )
      SELECT upserted.*,
-            previous.ip_address AS previous_ip_address,
+            previous.ip_address  AS previous_ip_address,
+            previous.hostname    AS previous_hostname,
+            previous.vendor      AS previous_vendor,
+            previous.device_type AS previous_device_type,
+            previous.status      AS previous_status,
             previous.ip_address IS NULL AS is_new
      FROM upserted LEFT JOIN previous ON true`,
     [
@@ -54,7 +61,7 @@ export async function upsertDiscoveredDevice(db, networkId, device) {
  *
  * @param {Executor} db
  * @param {{ networkId: string, sweptRange: string, seenDeviceIds: string[] }} options
- * @returns {Promise<Array<{ id: string, ip_address: string, mac_address: string }>>}
+ * @returns {Promise<Array<Record<string, any>>>} the devices that went offline (full rows)
  */
 export async function markUnseenDevicesOffline(db, { networkId, sweptRange, seenDeviceIds }) {
   const { rows } = await db.query(
@@ -63,7 +70,7 @@ export async function markUnseenDevicesOffline(db, { networkId, sweptRange, seen
        AND status = 'online'
        AND ip_address << $2::cidr
        AND NOT (id = ANY ($3::uuid[]))
-     RETURNING id, ip_address, mac_address`,
+     RETURNING *`,
     [networkId, sweptRange, seenDeviceIds],
   );
   return rows;

@@ -58,9 +58,10 @@ function SortableHead({ column, sort, dir, onSort }) {
 /**
  * Sortable device table (tablet and desktop). Sorting is controlled by the parent.
  * @param {{ devices: import('@/types/api').Device[], sort: string, dir: 'asc' | 'desc',
- *           onSort: (field: string) => void, now: number, ipChanges: Record<string, string> }} props
+ *           onSort: (field: string) => void, now: number, ipChanges: Record<string, string>,
+ *           changedAt: Record<string, number> }} props
  */
-export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges }) {
+export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges, changedAt = {} }) {
   return (
     <Table className="text-[13px]">
       <TableHeader className="bg-muted/20">
@@ -79,9 +80,11 @@ export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges }) {
       <TableBody>
         {devices.map((device) => (
           <TableRow
-            key={device.id}
+            // A live change gives the row a new key: it re-mounts once and plays the highlight.
+            key={`${device.id}:${changedAt[device.id] ?? 0}`}
             className={cn(
-              'animate-in duration-300 fade-in-0 hover:bg-primary/[0.04]',
+              changedAt[device.id] ? 'animate-live-highlight' : 'animate-in duration-300 fade-in-0',
+              'hover:bg-primary/[0.04]',
               device.status === 'offline' && 'text-muted-foreground',
             )}
           >

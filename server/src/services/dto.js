@@ -20,6 +20,8 @@ export function toDeviceDto(row) {
     status: row.status,
     firstSeenAt: row.first_seen_at,
     lastSeenAt: row.last_seen_at,
+    // Lets clients discard a real-time event that is older than data they already have.
+    updatedAt: row.updated_at,
   };
 }
 

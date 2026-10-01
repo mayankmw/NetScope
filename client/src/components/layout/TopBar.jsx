@@ -1,5 +1,6 @@
 import { Network } from 'lucide-react';
 import { DiscoverButton } from '@/components/devices/DiscoverButton';
+import { LiveIndicator } from '@/components/system/LiveIndicator';
 import { SystemStatusIndicator } from '@/components/system/SystemStatusIndicator';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 import { Brand } from './Brand';
@@ -21,7 +22,10 @@ function NetworkBadge() {
   );
 }
 
-/** Sticky top bar: mobile menu, current network, system status, and the global discover action. */
+/**
+ * Sticky top bar: mobile menu, current network, live-update and system status, and the global
+ * discover action.
+ */
 export function TopBar() {
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/60 backdrop-blur-xl">
@@ -30,6 +34,7 @@ export function TopBar() {
         <Brand className="lg:hidden" />
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
           <NetworkBadge />
+          <LiveIndicator className="hidden sm:inline-flex" />
           <SystemStatusIndicator />
           <DiscoverButton className="hidden sm:inline-flex" />
           <DiscoverButton compact size="icon" className="sm:hidden" />

@@ -30,6 +30,13 @@ export default defineConfig(({ mode }) => {
           target: env.DEV_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET,
           changeOrigin: false,
         },
+        // Real-time events. changeOrigin stays off so the server sees the browser's Origin and
+        // can apply its allowlist.
+        '/ws': {
+          target: env.DEV_API_PROXY_TARGET || DEFAULT_API_PROXY_TARGET,
+          ws: true,
+          changeOrigin: false,
+        },
       },
     },
     build: {

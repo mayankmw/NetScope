@@ -137,6 +137,7 @@ describe('DevicesPage', () => {
     expect(screen.getByRole('button', { name: /scanning/i })).toBeDisabled();
 
     finishDiscovery({
+      scan: { id: 'scan-1' },
       summary: { devicesFound: 4, newDevices: 4, ipChanges: 0, wentOffline: 0, unresolvedHosts: 0 },
       network: { sweptRange: '192.168.1.0/24' },
       devices: [],

@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 4 of 12 — device list UI. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 5 of 12 — real-time updates. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -121,6 +121,11 @@ headline numbers, the current network, and system health. **Devices** lists ever
 search (press `/`), status/type/vendor filters, and sortable columns; filters live in the URL, so
 filtered views can be bookmarked. The layout adapts down to phone width.
 
+Updates are live: open NetScope in several tabs or browsers and a discovery started in any of
+them updates all the others (new devices, IP changes, devices going offline or coming back). The
+**Live** indicator in the top bar shows the connection; if it drops, NetScope reconnects on its
+own and reloads the list.
+
 From the command line:
 
 ```bash
@@ -168,7 +173,8 @@ refuses to start with a clear message if any are invalid. See `server/.env.examp
 netscope/
 ├── client/     React SPA — pages, components, layouts, hooks, services, stores, types, utils
 ├── server/     Express API — routes, controllers, services, middleware, config, errors
-├── docs/       Architecture, API, database, roadmap
+├── shared/   Contracts used by both sides (real-time event types)
+├── docs/     Architecture, API, database, discovery, roadmap
 └── package.json  npm workspaces + root scripts
 ```
 
@@ -180,7 +186,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 2. ✅ PostgreSQL setup
 3. ✅ Device discovery
 4. ✅ Device list UI
-5. Live WebSocket updates
+5. ✅ Live WebSocket updates
 6. Device details
 7. Safe port scanning
 8. Network topology visualization

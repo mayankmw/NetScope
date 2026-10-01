@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 4.** `GET /api/health`, `GET /api/devices`, and `POST /api/devices/discover` are implemented. Everything else is the plan, and
+> Status: **Step 5.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -313,7 +313,101 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
 `sources.*.status` is `ok`, `unavailable` (tool missing), `failed` (ran but errored), or
 `skipped` (disabled). Only an unreadable ARP cache fails the whole discovery.
 
-## 7. Planned endpoints
+## 7. WebSocket
+
+Live events at `ws://<host>:<port>/ws` (`WS_PATH`), on the API's own port. In development the UI
+connects through the Vite proxy (`ws://localhost:5173/ws`). Browsers must connect from an
+allowed origin (`CORS_ORIGIN`, or same-origin); other origins get `403`.
+
+The socket is **push-only**: every event below goes to every connected client. Changes are made
+through the REST API. Event names are defined once in
+[`shared/src/events.js`](../shared/src/events.js).
+
+### Envelope
+
+```json
+{
+  "v": 1,
+  "id": "0f9d2c7e-5b1a-4c8e-9a3f-7e6d5c4b3a21",
+  "type": "device.discovered",
+  "timestamp": "2026-10-01T08:30:12.345Z",
+  "data": {}
+}
+```
+
+`id` is unique per event (clients use it to drop duplicates). `v` changes only for incompatible
+contract changes. Unknown `type`s must be ignored by clients.
+
+### Events
+
+| Type                  | When                                                    | `data`                                                                                                                   |
+| --------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `system.connected`    | To a client, right after it connects                    | `connectionId`, `serverVersion`, `heartbeatIntervalMs`, `activeDiscovery` (`{ scanId, networkId, startedAt }` or `null`) |
+| `system.heartbeat`    | Every `heartbeatIntervalMs`, to all clients             | `{}`                                                                                                                     |
+| `system.pong`         | Reply to `{"type":"ping"}`                              | `id` (echoed, or `null`)                                                                                                 |
+| `system.error`        | Reply to an invalid client message                      | `code` (`INVALID_MESSAGE`), `message`                                                                                    |
+| `discovery.started`   | A discovery was recorded and is running                 | `scanId`, `networkId`, `sweptRange`, `triggeredBy`, `startedAt`                                                          |
+| `discovery.completed` | A discovery finished and its results are committed      | `scanId`, `networkId`, `sweptRange`, `summary`, `durationMs`, `finishedAt`, `seenDeviceIds`                              |
+| `discovery.failed`    | A started discovery failed, timed out, or was cancelled | `scanId`, `networkId`, `error: { code, message }`                                                                        |
+| `device.discovered`   | A MAC was seen on this network for the first time       | `networkId`, `device`                                                                                                    |
+| `device.updated`      | IP, hostname, vendor, or type changed                   | `networkId`, `device`, `changes` (field names), `previous` (old values)                                                  |
+| `device.online`       | A device that was offline was seen again                | `networkId`, `device`                                                                                                    |
+| `device.offline`      | A device in the swept range was not seen                | `networkId`, `device`                                                                                                    |
+
+`device` has the same shape as in `GET /api/devices` (including `isGateway` and `updatedAt`).
+A device seen again with no change produces no device event: `discovery.completed.seenDeviceIds`
+lists every device seen, whose `lastSeenAt` is `finishedAt`.
+
+**Order per discovery:** `discovery.started` → device events → `discovery.completed`, or
+`discovery.started` → `discovery.failed`. Device events and `discovery.completed` are sent only
+after the database transaction commits. A request rejected before the run starts (e.g. `409`)
+sends nothing.
+
+Example `device.updated`:
+
+```json
+{
+  "v": 1,
+  "id": "6c1e8a1b-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+  "type": "device.updated",
+  "timestamp": "2026-10-01T08:30:12.345Z",
+  "data": {
+    "networkId": "5c50d134-16e1-401a-8a6a-2940b6e9d204",
+    "changes": ["ipAddress"],
+    "previous": { "ipAddress": "192.168.1.20" },
+    "device": {
+      "id": "8f2c1d3e-6b7a-4c9d-8e1f-2a3b4c5d6e7f",
+      "ipAddress": "192.168.1.21",
+      "macAddress": "b8:27:eb:12:34:56",
+      "status": "online",
+      "updatedAt": "2026-10-01T08:30:12.301Z"
+    }
+  }
+}
+```
+
+(`device` abridged.)
+
+### Client → server
+
+Only `{"type":"ping","id":"optional"}` is accepted (answered with `system.pong`). Anything else gets
+`system.error`; five invalid messages close the socket with `1008`; binary frames close it with
+`1003`. Messages are limited to 16 KiB.
+
+### Liveness and close codes
+
+The server pings every client each heartbeat and terminates clients that did not answer the
+previous ping. Clients should treat two missed `system.heartbeat`s as a dead connection and
+reconnect (with backoff), then reload state over REST.
+
+| Code   | Meaning                                                  |
+| ------ | -------------------------------------------------------- |
+| `1001` | Server shutting down: reconnect later                    |
+| `1003` | Binary frame received                                    |
+| `1008` | Too many invalid messages                                |
+| `1013` | Client too slow to read (over 1 MiB buffered): reconnect |
+
+## 8. Planned endpoints
 
 ### `/api/devices`
 
@@ -336,7 +430,7 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
 | `POST /api/scans/:scanId/cancel` | 5    | Cancel a queued or running scan                                      |
 | `GET /api/scans`                 | 9    | Scan history (paginated)                                             |
 
-Discovery moves to `202 Accepted` with WebSocket progress in Step 5; until then it is synchronous.
+Discovery stays synchronous; other clients follow it through WebSocket events. Asynchronous (`202`) runs arrive with scheduled scans in Step 9.
 
 ### `/api/network`
 

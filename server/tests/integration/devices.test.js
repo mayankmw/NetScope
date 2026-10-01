@@ -76,6 +76,7 @@ describe('GET /api/devices', () => {
       isGateway: false,
       firstSeenAt: expect.any(String),
       lastSeenAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
   });
 

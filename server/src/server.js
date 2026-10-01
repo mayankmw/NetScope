@@ -3,14 +3,29 @@ import { createApp } from './app.js';
 import { config } from './config/index.js';
 import { getMigrationStatus } from './db/migrator.js';
 import { closePool, getDatabaseInfo, query } from './db/pool.js';
-import { cancelActiveDiscovery, recoverInterruptedScans } from './services/discovery.service.js';
+import { eventBus } from './events/eventBus.js';
+import {
+  cancelActiveDiscovery,
+  getActiveDiscovery,
+  recoverInterruptedScans,
+} from './services/discovery.service.js';
 import { logger } from './utils/logger.js';
+import { attachWebSocketServer } from './websocket/wsManager.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', '::1', 'localhost']);
 
 const server = http.createServer(createApp());
-// Step 5 attaches the WebSocket manager to this same HTTP server (shared port, path /ws).
+
+// Real-time events share the API's port and origin (Vite proxies /ws in development).
+const realtime = attachWebSocketServer(server, {
+  path: config.websocket.path,
+  heartbeatIntervalMs: config.websocket.heartbeatIntervalMs,
+  allowedOrigins: config.cors.origins,
+  eventBus,
+  serverVersion: config.app.version,
+  getConnectionState: () => ({ activeDiscovery: getActiveDiscovery() }),
+});
 
 /**
  * Startup database check. The API starts even when PostgreSQL is down: /api/health then reports
@@ -59,6 +74,7 @@ server.on('error', (error) => {
 server.listen(config.server.port, config.server.host, () => {
   const { host, port } = config.server;
   logger.info({ host, port, env: config.env }, `NetScope API listening on http://${host}:${port}`);
+  logger.info(`Real-time events on ws://${host}:${port}${config.websocket.path}`);
 
   if (!LOOPBACK_HOSTS.has(host)) {
     logger.warn(
@@ -73,7 +89,7 @@ server.listen(config.server.port, config.server.host, () => {
 
 let shuttingDown = false;
 
-function shutdown(signal) {
+async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info({ signal }, 'Shutting down gracefully');
@@ -84,10 +100,16 @@ function shutdown(signal) {
   }, SHUTDOWN_TIMEOUT_MS);
   forceExit.unref();
 
-  // Order matters: cancel a running discovery (its request then finishes quickly), stop
-  // accepting requests and let in-flight ones finish (they may still need the database), then
-  // close the pool. Step 5 adds: close WebSocket clients.
+  // Order matters: cancel a running discovery (its request then finishes quickly), close
+  // WebSocket clients (1001, so they reconnect when the server is back), stop accepting requests
+  // and let in-flight ones finish (they may still need the database), then close the pool.
   cancelActiveDiscovery();
+  try {
+    await realtime.close();
+    logger.info('WebSocket connections closed');
+  } catch (error) {
+    logger.error({ err: error }, 'Error while closing WebSocket connections');
+  }
   server.close(async (serverError) => {
     let exitCode = 0;
     if (serverError) {

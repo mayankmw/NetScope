@@ -8,10 +8,13 @@ import { DeviceStatusBadge } from './DeviceStatusBadge';
 import { DeviceTypeAvatar } from './DeviceTypeLabel';
 
 /** One device as a card (phones and small tablets). */
-export function DeviceCard({ device, now, previousIp }) {
+export function DeviceCard({ device, now, previousIp, changed = false }) {
   const online = device.status === 'online';
   return (
-    <GlassPanel as="article" className={cn('space-y-3 p-4', !online && 'opacity-80')}>
+    <GlassPanel
+      as="article"
+      className={cn('space-y-3 p-4', !online && 'opacity-80', changed && 'animate-live-ring')}
+    >
       <div className="flex items-start gap-3">
         <DeviceTypeAvatar type={device.deviceType} online={online} />
         <div className="min-w-0 flex-1">
@@ -62,17 +65,22 @@ export function DeviceCard({ device, now, previousIp }) {
 }
 
 /** Card grid for narrow screens. Cards fade in with a short stagger. */
-export function DeviceGrid({ devices, now, ipChanges }) {
+export function DeviceGrid({ devices, now, ipChanges, changedAt = {} }) {
   return (
     <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {devices.map((device, index) => (
         <motion.li
-          key={device.id}
+          key={`${device.id}:${changedAt[device.id] ?? 0}`}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.025 }}
         >
-          <DeviceCard device={device} now={now} previousIp={ipChanges[device.id]} />
+          <DeviceCard
+            device={device}
+            now={now}
+            previousIp={ipChanges[device.id]}
+            changed={Boolean(changedAt[device.id])}
+          />
         </motion.li>
       ))}
     </ul>

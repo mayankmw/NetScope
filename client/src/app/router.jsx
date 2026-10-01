@@ -1,4 +1,5 @@
 import { createBrowserRouter } from 'react-router';
+import { PageFallback } from '@/components/common/PageFallback';
 import { AppLayout } from '@/layouts/AppLayout';
 import { NotFoundPage } from '@/pages/NotFoundPage';
 import { RouteErrorPage } from '@/pages/RouteErrorPage';
@@ -20,6 +21,9 @@ export const routes = [
       {
         // Pathless route: errors inside pages render within the layout, keeping navigation.
         errorElement: <RouteErrorPage />,
+        // Shown in the page area while a lazy page's code loads on first visit; the sidebar and
+        // top bar render immediately.
+        hydrateFallbackElement: <PageFallback />,
         children: [
           {
             index: true,

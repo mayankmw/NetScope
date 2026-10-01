@@ -4,12 +4,14 @@ import { Toaster } from '@/components/common/Toaster';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { TopBar } from '@/components/layout/TopBar';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { useRealtime } from '@/hooks/useRealtime';
 
 /**
  * Application shell: sidebar (desktop), sticky top bar, and the routed page, which fades in on
- * navigation. Toasts and tooltips are provided here for every page.
+ * navigation. Toasts, tooltips, and the real-time connection live here for every page.
  */
 export function AppLayout() {
+  useRealtime();
   const { pathname } = useLocation();
   const outlet = useOutlet();
 

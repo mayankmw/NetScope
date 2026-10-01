@@ -155,6 +155,32 @@
   text-shadow: 0 0 14px color-mix(in oklch, var(--primary) 45%, transparent);
 }
 
+/* One-off highlight for a device changed by a live event (colour only, no movement). */
+@keyframes live-highlight {
+  from {
+    background-color: color-mix(in oklch, var(--primary) 16%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@keyframes live-ring {
+  from {
+    box-shadow:
+      0 0 0 1px color-mix(in oklch, var(--primary) 60%, transparent),
+      0 0 22px -6px var(--primary);
+  }
+}
+
+@utility animate-live-highlight {
+  animation: live-highlight 2.5s ease-out 1;
+}
+
+@utility animate-live-ring {
+  animation: live-ring 2.5s ease-out 1;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

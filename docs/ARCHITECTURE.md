@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 4 — device list UI.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 5 — real-time updates.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -109,9 +109,9 @@ netscope/
 │   │   ├── errors/                AppError + stable error codes
 │   │   ├── db/                    pool.js, errors.js, migrator.js, migrate.js (CLI), migrations/; repositories/ (3)
 │   │   ├── network/               Discovery + diagnostics (see §5, DISCOVERY.md)
-│   │   ├── jobs/                  (5) In-process scan job runner
-│   │   ├── events/                (5) Internal event bus
-│   │   ├── websocket/             (5) wsManager, message schemas
+│   │   ├── jobs/                  (9) In-process scan job runner (scheduled scans)
+│   │   ├── events/                eventBus: in-process publish/subscribe of domain events
+│   │   ├── websocket/             wsManager (connections, heartbeat, broadcast), messages
 │   │   ├── utils/                 logger, apiResponse
 │   │   ├── app.js                 Builds the Express app (no port binding → testable)
 │   │   └── server.js              Entry point: HTTP server, listen, graceful shutdown
@@ -123,7 +123,7 @@ netscope/
 │   ├── eslint.config.js
 │   └── vitest.config.js
 │
-├── shared/                        (5) @netscope/shared — contracts used by both sides
+├── shared/                        @netscope/shared — contracts used by both sides (event types)
 │                                  (WebSocket event names, error codes)
 ├── docker/postgres/init/          SQL run once when the dev database volume is created
 ├── docs/                          Architecture, API, database, roadmap
@@ -299,51 +299,36 @@ scope for the MVP.
 
 ## 6. WebSocket architecture
 
-_Built in Step 5._
+_Built in Step 5._ Event contract: [API.md — WebSocket](API.md#7-websocket).
 
-| Aspect       | Design                                                                                                                                              |
-| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Transport    | `ws` library, attached to the existing HTTP server at path `/ws` (same port, same origin; Vite proxies it in development).                          |
-| Direction    | Server → client events. Client → server messages limited to `subscribe` / `unsubscribe`.                                                            |
-| Source       | Services publish domain events on the internal **event bus**; `wsManager` subscribes and fans out. Services never import the WebSocket layer.       |
-| Channels     | `devices`, `scans`, `alerts`, `system`. Clients subscribe to what the current view needs.                                                           |
-| Liveness     | Protocol-level ping every `WS_HEARTBEAT_INTERVAL_MS`; clients that miss a pong are terminated. Browsers answer pings automatically.                 |
-| Reconnect    | Client reconnects with exponential backoff + jitter (1 s → 30 s cap), re-subscribes, then **re-fetches snapshots over REST**.                       |
-| Security     | `Origin` checked against the CORS allowlist during the upgrade; `maxPayload` 16 KiB; incoming messages validated with zod; auth cookie _(Step 12)_. |
-| Backpressure | If a client's `bufferedAmount` exceeds a threshold, drop non-critical events (progress) or close with code 1013; the client resyncs via REST.       |
-
-**Message envelope** (both directions):
-
-```json
-{
-  "v": 1,
-  "type": "device.discovered",
-  "channel": "devices",
-  "id": "6f1c1c9e-6a4b-4a70-8a3c-0b3f7d0d8f55",
-  "ts": "2026-09-29T12:00:00.000Z",
-  "data": {}
-}
+```
+discovery.service ──publish──▶ eventBus ──▶ wsManager ──broadcast──▶ every connected browser
+ (after commit)                 (in-process)   (/ws, same port)          realtimeClient → stores → UI
 ```
 
-**Event catalog (initial)**
+| Aspect            | Design                                                                                                                                                                                                                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport         | `ws`, attached to the API's HTTP server at `WS_PATH` (`/ws`): same port, same origin. Vite proxies `/ws` in development.                                                                                                                                                           |
+| Direction         | Push only: every domain event goes to every client. State changes go through the REST API; clients may only send `{"type":"ping"}`.                                                                                                                                                |
+| Decoupling        | Services publish on `events/eventBus.js` and never import the WebSocket layer; controllers never touch it. A throwing subscriber is logged and isolated.                                                                                                                           |
+| Consistency       | Device events and `discovery.completed` are published only after the transaction commits. Each change is derived from the database's before/after values, so it produces one event.                                                                                                |
+| Snapshot + delta  | Clients load state over REST, then apply events. After any reconnection they reload the snapshot: events are not replayed, so nothing can be missed permanently.                                                                                                                   |
+| Duplicates        | Every event has a unique `id`; the client drops ids it has seen (last 500). Applying an event twice is harmless, and an event older than the data held (`updatedAt`) is ignored.                                                                                                   |
+| Liveness          | Every `WS_HEARTBEAT_INTERVAL_MS` the server pings each client and terminates any that did not answer the previous ping; it also sends `system.heartbeat`, which browsers can see. The client treats two missed heartbeats (+10 s) as a dead connection.                            |
+| Reconnection      | Exponential backoff with jitter (1 s, 2 s, 4 s … 30 s cap), reset on success; immediate retry when the browser comes back online or the tab becomes visible.                                                                                                                       |
+| Security          | Browser `Origin` must be in the CORS allowlist (or same-origin), which blocks cross-site WebSocket hijacking. 16 KiB message limit, zod-validated messages, binary frames refused, 5 invalid messages close the socket (1008), max 100 clients. Authentication arrives in Step 12. |
+| Backpressure      | A client with more than 1 MiB unsent is closed with 1013; it reconnects and resyncs over REST.                                                                                                                                                                                     |
+| Failure isolation | Socket errors are logged per connection; a client failure never affects others or the process. Graceful shutdown closes all clients with 1001 before the HTTP server and the DB pool.                                                                                              |
 
-| Type                               | Channel   | Emitted when                                                |
-| ---------------------------------- | --------- | ----------------------------------------------------------- |
-| `system.hello`                     | —         | Connection established (server version, heartbeat interval) |
-| `scan.queued` / `scan.started`     | `scans`   | A scan is accepted / begins                                 |
-| `scan.progress`                    | `scans`   | Periodically while running (`phase`, `completed`, `total`)  |
-| `scan.completed` / `scan.failed`   | `scans`   | A scan finishes                                             |
-| `device.discovered`                | `devices` | A device is seen for the first time                         |
-| `device.updated`                   | `devices` | IP, hostname, vendor, or user-edited fields change          |
-| `device.online` / `device.offline` | `devices` | Presence changes                                            |
-| `alert.created`                    | `alerts`  | An alert rule fires _(Step 10)_                             |
-| `error`                            | —         | A client message was rejected                               |
+**Why the discover endpoint stays synchronous.** The tab that starts a scan gets its result in
+the HTTP response; all other tabs follow along through events. Events are purely additive, so if
+the socket is down the app still works and catches up on reconnect. Asynchronous (202) runs come
+with the job runner and scheduled scans in Step 9.
 
-Client → server: `{ "type": "subscribe", "data": { "channels": ["devices", "scans"] } }` and `unsubscribe`.
-
-**Client side:** a singleton `services/socketClient.js` owns the connection; a
-`useConnectionStore` exposes its status to the UI; stores register handlers that apply events to
-their state; `hooks/useSocketEvent` covers component-level needs.
+**Client side.** `services/realtimeClient.js` owns the single connection (backoff, watchdog,
+dedupe) and knows nothing about React. `hooks/useRealtime.js`, mounted once in `AppLayout`,
+routes its status to `useConnectionStore` (top-bar "Live" indicator) and its events to
+`useDeviceStore.applyEvent`. Rows changed by an event get a brief highlight.
 
 ## 7. Frontend architecture
 
@@ -493,7 +478,7 @@ defaults for later steps are proposals, finalized in their step.
 | `NMAP_DISCOVERY`                 | 3    | `auto`                  |        | `auto`: use nmap host discovery when installed; `off`: never            |
 | `NMAP_PATH`                      | 3    | standard locations      |        | Absolute nmap path if installed elsewhere (must end in `/nmap`)         |
 | `WS_PATH`                        | 5    | `/ws`                   |        | WebSocket endpoint                                                      |
-| `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping interval for dead-connection detection                             |
+| `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping + `system.heartbeat` interval; unresponsive clients are dropped    |
 | `PORT_SCAN_PORTS`                | 7    | curated common ports    |        | Allowed port list (validated, hard-capped)                              |
 | `SCAN_RATE_LIMIT_PER_HOUR`       | 7    | `30`                    |        | Scan requests per client per hour                                       |
 | `SCAN_SCHEDULE_MINUTES`          | 9    | `0` (off)               |        | Periodic discovery interval                                             |
@@ -510,7 +495,7 @@ defaults for later steps are proposals, finalized in their step.
 | ---------------------- | ---- | ----------------------- | ------------------------------------------------------------------------- |
 | `VITE_API_BASE_URL`    | 1    | `/api`                  | API base. Keep relative so the browser always uses its own origin.        |
 | `DEV_API_PROXY_TARGET` | 1    | `http://127.0.0.1:4000` | Dev-server only (read in `vite.config.js`, never shipped to the browser). |
-| `VITE_WS_PATH`         | 5    | `/ws`                   | WebSocket path, resolved against the page origin                          |
+| `VITE_WS_PATH`         | 5    | `/ws`                   | WebSocket path on the page origin, or a full `ws(s)://` URL               |
 
 `VITE_*` variables are compiled into the public bundle — never put secrets in them.
 
@@ -559,12 +544,12 @@ defaults for later steps are proposals, finalized in their step.
 | `sonner` _(Step 4)_                                        | client       | Toast notifications for discovery results and errors.                          |
 | `@fontsource-variable/geist-mono` _(Step 4)_               | client       | Self-hosted monospace font for IPs and MACs.                                   |
 | `vitest`, `jsdom` (29), `@testing-library/*` _(Step 4)_    | client (dev) | Component and store tests. jsdom 29 is the newest that supports Node 22.13.    |
+| `ws` _(Step 5)_                                            | server       | WebSocket server (and the client in server tests).                             |
 
 ### Added in later steps
 
 | Package / tool         | Step             | Why                                                                             |
 | ---------------------- | ---------------- | ------------------------------------------------------------------------------- |
-| `ws`                   | 5                | WebSocket server.                                                               |
 | `express-rate-limit`   | 7                | Throttle scan-triggering endpoints.                                             |
 | `nmap` (system binary) | 3 (optional) / 7 | Host discovery and TCP connect scans. `brew install nmap` / `apt install nmap`. |
 | `cytoscape`            | 8                | Graph rendering for the topology view.                                          |

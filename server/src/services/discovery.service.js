@@ -1,3 +1,4 @@
+import { EventTypes } from '@netscope/shared/events';
 import { config } from '../config/index.js';
 import * as devicesRepository from '../db/repositories/devices.repository.js';
 import * as networksRepository from '../db/repositories/networks.repository.js';
@@ -5,8 +6,10 @@ import * as scansRepository from '../db/repositories/scans.repository.js';
 import { db, withTransaction } from '../db/pool.js';
 import { AppError } from '../errors/AppError.js';
 import { ErrorCodes } from '../errors/errorCodes.js';
+import { eventBus } from '../events/eventBus.js';
 import * as network from '../network/index.js';
 import { logger } from '../utils/logger.js';
+import { deriveDeviceEvents } from './deviceEvents.js';
 import { toDeviceDto } from './dto.js';
 
 const { NetworkError, NetworkErrorCodes } = network;
@@ -83,7 +86,12 @@ function toDeviceResponse(row, device) {
  * Discovers the devices currently visible on the local network and records them.
  *
  * Flow: detect network → record scan → ping sweep → nmap (optional) → ARP cache → merge by MAC
- *       → vendor + hostname + type → persist (one transaction) → response.
+ *       → vendor + hostname + type → persist (one transaction) → events → response.
+ *
+ * Events (published on the event bus, broadcast to WebSocket clients):
+ *   discovery.started once the scan is recorded; device.* and discovery.completed only after the
+ *   transaction commits (clients never see uncommitted state); discovery.failed on any failure
+ *   after discovery.started.
  *
  * Takes no caller-supplied targets: the range is always the local subnet, from the OS.
  *
@@ -145,9 +153,20 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
       }
       throw error;
     }
-    activeDiscovery.scanId = scan.id;
+    Object.assign(activeDiscovery, {
+      scanId: scan.id,
+      networkId: networkRow.id,
+      startedAt: scan.started_at,
+    });
     log = log.child({ scanId: scan.id });
     log.info({ triggeredBy }, 'Discovery: scan started');
+    eventBus.publish(EventTypes.DISCOVERY_STARTED, {
+      scanId: scan.id,
+      networkId: networkRow.id,
+      sweptRange: detected.sweepCidr,
+      triggeredBy,
+      startedAt: scan.started_at,
+    });
 
     // 1. Ping sweep: finds responsive hosts and fills the ARP cache.
     const ping = await runSource('ping', log, signal, () =>
@@ -233,6 +252,7 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     signal.throwIfAborted();
     const persisted = await withTransaction(async (client) => {
       const saved = [];
+      const upserted = [];
       for (const device of devices) {
         const row = await devicesRepository.upsertDiscoveredDevice(client, networkRow.id, device);
         await devicesRepository.insertObservation(client, {
@@ -242,6 +262,7 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
           hostname: device.hostname,
           latencyMs: device.latencyMs,
         });
+        upserted.push(row);
         saved.push(toDeviceResponse(row, device));
       }
       const wentOffline = await devicesRepository.markUnseenDevicesOffline(client, {
@@ -250,10 +271,10 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
         seenDeviceIds: saved.map((device) => device.id),
       });
       const completed = await scansRepository.completeScan(client, scan.id);
-      return { saved, wentOffline, completed };
+      return { saved, upserted, wentOffline, completed };
     });
 
-    const { saved, wentOffline, completed } = persisted;
+    const { saved, upserted, wentOffline, completed } = persisted;
     for (const device of saved) {
       if (device.isNew) {
         log.info(
@@ -277,6 +298,25 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     };
     const durationMs = Math.round(performance.now() - startedAt);
     log.info({ durationMs, ...summary }, 'Discovery: completed');
+
+    // Committed: tell connected clients what changed, then that the run is over.
+    const deviceEvents = deriveDeviceEvents({
+      networkId: networkRow.id,
+      gatewayMac: detected.gatewayMac,
+      upserted,
+      wentOffline,
+    });
+    for (const { type, data } of deviceEvents) eventBus.publish(type, data);
+    eventBus.publish(EventTypes.DISCOVERY_COMPLETED, {
+      scanId: scan.id,
+      networkId: networkRow.id,
+      sweptRange: detected.sweepCidr,
+      summary,
+      durationMs,
+      finishedAt: completed.finished_at,
+      // Devices seen again without other changes get no event: their lastSeenAt is this time.
+      seenDeviceIds: saved.map((device) => device.id),
+    });
 
     return {
       scan: {
@@ -344,12 +384,30 @@ async function handleFailure({ error, signal, controller, scan, log }) {
     }
   }
 
+  const code = appError?.code ?? ErrorCodes.INTERNAL_ERROR;
   const level = appError && appError.statusCode < 500 ? 'warn' : 'error';
-  log[level](
-    { err: error, code: appError?.code ?? ErrorCodes.INTERNAL_ERROR },
-    'Discovery: failed',
-  );
+  log[level]({ err: error, code }, 'Discovery: failed');
+
+  // Pairs with discovery.started: only runs that were announced are reported as failed.
+  if (scan) {
+    eventBus.publish(EventTypes.DISCOVERY_FAILED, {
+      scanId: scan.id,
+      networkId: scan.network_id,
+      error: { code, message: appError?.message ?? 'Unexpected error during discovery.' },
+    });
+  }
   return appError ?? error;
+}
+
+/**
+ * The discovery running right now, if it has been announced (`discovery.started`), so a client
+ * connecting mid-scan can show it.
+ * @returns {{ scanId: string, networkId: string, startedAt: Date } | null}
+ */
+export function getActiveDiscovery() {
+  if (!activeDiscovery?.scanId) return null;
+  const { scanId, networkId, startedAt } = activeDiscovery;
+  return { scanId, networkId, startedAt };
 }
 
 /** Cancels the running discovery, if any (graceful shutdown). */

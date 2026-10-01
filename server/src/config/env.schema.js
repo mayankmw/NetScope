@@ -19,8 +19,7 @@ const optional = (schema) =>
   z.preprocess((value) => (value === '' ? undefined : value), schema.optional());
 
 /**
- * Environment variables the server reads. Later steps extend this schema
- * (WS_*, ...) — see docs/ARCHITECTURE.md#9-environment-variables.
+ * Environment variables the server reads. Later steps extend this schema — see docs/ARCHITECTURE.md#9-environment-variables.
  */
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -51,6 +50,11 @@ export const envSchema = z.object({
   PING_TIMEOUT_MS: milliseconds(200, 5_000, 1_000),
   PING_CONCURRENCY: z.coerce.number().int().min(1).max(128).default(64),
   NMAP_DISCOVERY: z.enum(['auto', 'off']).default('auto'),
+  WS_PATH: z
+    .string()
+    .regex(/^\/[A-Za-z0-9/_-]{0,63}$/, 'must be a URL path such as /ws')
+    .default('/ws'),
+  WS_HEARTBEAT_INTERVAL_MS: milliseconds(5_000, 300_000, 30_000),
   NMAP_PATH: optional(
     z.string().regex(/^\/[^\0]*\/nmap$/, 'must be an absolute path ending in /nmap'),
   ),
@@ -115,6 +119,10 @@ export function parseEnv(env, appInfo) {
       poolMax: vars.DATABASE_POOL_MAX,
       connectionTimeoutMs: vars.DATABASE_CONNECTION_TIMEOUT_MS,
       statementTimeoutMs: vars.DATABASE_STATEMENT_TIMEOUT_MS,
+    },
+    websocket: {
+      path: vars.WS_PATH,
+      heartbeatIntervalMs: vars.WS_HEARTBEAT_INTERVAL_MS,
     },
     scan: {
       interfaceName: vars.SCAN_INTERFACE ?? null,

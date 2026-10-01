@@ -57,6 +57,7 @@ describe('discoverNetwork', () => {
   it('runs discovery, records IP changes, then reloads the full inventory', async () => {
     const moved = makeDevice({ id: 'pi', ipAddress: '192.168.1.21' });
     deviceService.discoverDevices.mockResolvedValue({
+      scan: { id: 'scan-2' },
       summary: { devicesFound: 1, newDevices: 0, ipChanges: 1, wentOffline: 0, unresolvedHosts: 0 },
       network: { sweptRange: '192.168.1.0/24' },
       devices: [{ ...moved, isNew: false, previousIpAddress: '192.168.1.20' }],
@@ -96,7 +97,7 @@ describe('discoverNetwork', () => {
     await expect(store().discoverNetwork()).resolves.toBeNull();
     expect(deviceService.discoverDevices).toHaveBeenCalledTimes(1);
 
-    finish({ summary: {}, network: {}, devices: [] });
+    finish({ scan: { id: 'scan-3' }, summary: {}, network: {}, devices: [] });
     await first;
   });
 });

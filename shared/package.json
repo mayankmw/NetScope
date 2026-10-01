@@ -1,0 +1,14 @@
+{
+  "name": "@netscope/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Contracts shared by the NetScope server and client.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    "./events": "./src/events.js"
+  },
+  "scripts": {
+    "lint": "eslint ."
+  }
+}

@@ -29,6 +29,7 @@ const { closePool, query } = await import('../../src/db/pool.js');
 const { cancelActiveDiscovery } = await import('../../src/services/discovery.service.js');
 const { NetworkError, NetworkErrorCodes } = await import('../../src/network/errors.js');
 const { resetDatabase } = await import('../helpers/db.js');
+const { eventBus } = await import('../../src/events/eventBus.js');
 
 const app = createApp();
 
@@ -70,12 +71,113 @@ function makeScenario({ piIp = '192.168.50.20', overrides = {} } = {}) {
 
 const discover = () => request(app).post('/api/devices/discover');
 
+// Every event published on the bus during a test, in order.
+let events = [];
+const unsubscribe = eventBus.subscribe((event) => events.push(event));
+const eventTypes = () => events.map((event) => event.type);
+
 beforeEach(async () => {
   await resetDatabase();
   scenario.current = makeScenario();
+  events = [];
 });
 
-afterAll(() => closePool());
+afterAll(async () => {
+  unsubscribe();
+  await closePool();
+});
+
+describe('discovery events', () => {
+  it('announces the run, each new device, and the completion, in that order', async () => {
+    const res = await discover().expect(200);
+
+    expect(eventTypes()).toEqual([
+      'discovery.started',
+      'device.discovered',
+      'device.discovered',
+      'device.discovered',
+      'discovery.completed',
+    ]);
+    const [started, , , , completed] = events;
+    const scanId = res.body.data.scan.id;
+    expect(started.data).toMatchObject({
+      scanId,
+      networkId: res.body.data.network.id,
+      sweptRange: '192.168.50.0/24',
+      triggeredBy: 'manual',
+    });
+    expect(completed.data).toMatchObject({
+      scanId,
+      summary: res.body.data.summary,
+      seenDeviceIds: res.body.data.devices.map((device) => device.id),
+    });
+    expect(new Set(events.map((event) => event.id)).size).toBe(events.length);
+  });
+
+  it('sends device events only for real changes', async () => {
+    await discover().expect(200);
+    events = [];
+
+    await discover().expect(200); // nothing changed
+    expect(eventTypes()).toEqual(['discovery.started', 'discovery.completed']);
+
+    events = [];
+    scenario.current = makeScenario({ piIp: '192.168.50.21' });
+    await discover().expect(200);
+    const updated = events.find((event) => event.type === 'device.updated');
+    expect(updated.data).toMatchObject({
+      changes: ['ipAddress'],
+      previous: { ipAddress: '192.168.50.20' },
+      device: { macAddress: PI_MAC, ipAddress: '192.168.50.21' },
+    });
+  });
+
+  it('reports devices going offline and coming back', async () => {
+    await discover().expect(200);
+
+    events = [];
+    scenario.current = makeScenario({ piIp: null });
+    await discover().expect(200);
+    expect(events.find((event) => event.type === 'device.offline').data.device).toMatchObject({
+      macAddress: PI_MAC,
+      status: 'offline',
+    });
+
+    events = [];
+    scenario.current = makeScenario();
+    await discover().expect(200);
+    expect(eventTypes()).toEqual(['discovery.started', 'device.online', 'discovery.completed']);
+  });
+
+  it('announces a failure after the run started', async () => {
+    scenario.current = makeScenario({
+      overrides: {
+        arp: () => {
+          throw new NetworkError(NetworkErrorCodes.TOOL_UNAVAILABLE, '"arp" is not installed.');
+        },
+      },
+    });
+
+    await discover().expect(503);
+
+    expect(eventTypes()).toEqual(['discovery.started', 'discovery.failed']);
+    expect(events[1].data.error).toEqual({
+      code: 'TOOL_UNAVAILABLE',
+      message: '"arp" is not installed.',
+    });
+  });
+
+  it('publishes nothing when the run never starts', async () => {
+    await query(
+      `INSERT INTO scans (type, status, target, started_at)
+       VALUES ('discovery', 'running', '192.168.50.0/24', now())`,
+    );
+
+    await discover().expect(409);
+
+    expect(events).toEqual([]);
+  });
+});
 
 describe('POST /api/devices/discover', () => {
   it('discovers, normalizes, and persists devices', async () => {
@@ -125,6 +227,7 @@ describe('POST /api/devices/discover', () => {
       sources: ['arp', 'ping'],
       firstSeenAt: expect.any(String),
       lastSeenAt: expect.any(String),
+      updatedAt: expect.any(String),
     });
 
     const { rows } = await query(

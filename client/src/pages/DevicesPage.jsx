@@ -23,6 +23,7 @@ import { filterDevices, getFilterOptions, sortDevices } from '@/utils/deviceFilt
 export function DevicesPage() {
   const { network, devices, status, error, isRefreshing, refresh } = useDeviceInventory();
   const ipChanges = useDeviceStore((state) => state.recentIpChanges);
+  const changedAt = useDeviceStore((state) => state.changedAt);
   const filterState = useDeviceFilters();
   const { filters, activeCount, setSort, clearFilters } = filterState;
   const isWide = useMediaQuery('(min-width: 768px)');
@@ -116,11 +117,14 @@ export function DevicesPage() {
           onSort={setSort}
           now={now}
           ipChanges={ipChanges}
+          changedAt={changedAt}
         />
       </GlassPanel>
     );
   } else {
-    content = <DeviceGrid devices={visible} now={now} ipChanges={ipChanges} />;
+    content = (
+      <DeviceGrid devices={visible} now={now} ipChanges={ipChanges} changedAt={changedAt} />
+    );
   }
 
   return (
