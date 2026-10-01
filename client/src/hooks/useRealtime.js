@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { realtimeClient } from '@/services/realtimeClient';
 import { useConnectionStore } from '@/stores/useConnectionStore';
+import { useDeviceDetailsStore } from '@/stores/useDeviceDetailsStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 
 function plural(count, word) {
@@ -11,8 +12,8 @@ function plural(count, word) {
 
 /**
  * Connects the app to the real-time channel for as long as the shell is mounted:
- * connection status → useConnectionStore, events → useDeviceStore. After a reconnection the
- * device list is reloaded, since events sent while disconnected are not replayed.
+ * connection status → useConnectionStore, events → useDeviceStore and useDeviceDetailsStore.
+ * After a reconnection both are reloaded, since events sent while disconnected are not replayed.
  *
  * A discovery started from another tab or browser is reported with a toast here; this tab's own
  * discoveries are reported by useDiscoverNetwork from the HTTP response.
@@ -22,8 +23,9 @@ export function useRealtime() {
     const offStatus = realtimeClient.onStatus((info) => {
       useConnectionStore.getState().setStatus(info);
       const devices = useDeviceStore.getState();
-      if (info.status === 'open' && info.isReconnect && devices.status === 'success') {
-        devices.fetchDevices();
+      if (info.status === 'open' && info.isReconnect) {
+        if (devices.status === 'success') devices.fetchDevices();
+        useDeviceDetailsStore.getState().refresh();
       }
     });
 
@@ -34,6 +36,7 @@ export function useRealtime() {
 
       const isLocalScan = useDeviceStore.getState().discovery.localPending;
       useDeviceStore.getState().applyEvent(event);
+      useDeviceDetailsStore.getState().applyEvent(event);
 
       if (isLocalScan) return;
       if (event.type === EventTypes.DISCOVERY_COMPLETED) {

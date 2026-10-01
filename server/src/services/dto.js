@@ -43,3 +43,32 @@ export function toNetworkDto(row) {
       : null,
   };
 }
+
+/**
+ * @param {Record<string, any>} row a `device_events` row
+ */
+export function toDeviceEventDto(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    occurredAt: row.occurred_at,
+    ipAddress: row.ip_address,
+    changes: row.changes,
+    scanId: row.scan_id,
+  };
+}
+
+/**
+ * @param {Record<string, any>} row a `device_observations` row with the scan's `triggered_by`
+ */
+export function toObservationDto(row) {
+  return {
+    id: row.id,
+    observedAt: row.observed_at,
+    ipAddress: row.ip_address,
+    hostname: row.hostname,
+    latencyMs: row.latency_ms,
+    scanId: row.scan_id,
+    triggeredBy: row.triggered_by,
+  };
+}

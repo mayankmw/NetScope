@@ -3,7 +3,8 @@ import { query } from '../../src/db/pool.js';
 /** Empties every data table (lookup tables such as device_types keep their seed rows). */
 export async function resetDatabase() {
   await query(
-    `TRUNCATE alerts, port_scan_results, device_ports, device_observations, scans, devices, networks
+    `TRUNCATE alerts, port_scan_results, device_ports, device_events, device_observations, scans,
+              devices, networks
      RESTART IDENTITY`,
   );
 }
@@ -55,6 +56,41 @@ export async function insertScan(overrides = {}) {
       overrides.startedAt ?? null,
       overrides.finishedAt ?? null,
     ],
+  );
+  return rows[0];
+}
+
+/** Records that a scan saw a device. */
+export async function insertObservation({
+  scanId,
+  deviceId,
+  ipAddress,
+  latencyMs = null,
+  observedAt,
+}) {
+  const { rows } = await query(
+    `INSERT INTO device_observations (scan_id, device_id, ip_address, latency_ms, observed_at)
+     VALUES ($1, $2, $3, $4, COALESCE($5, now()))
+     RETURNING *`,
+    [scanId, deviceId, ipAddress, latencyMs, observedAt ?? null],
+  );
+  return rows[0];
+}
+
+/** Appends an event to a device's timeline. */
+export async function insertDeviceEvent({
+  deviceId,
+  scanId = null,
+  type,
+  ipAddress = '192.168.1.20',
+  changes = {},
+  occurredAt,
+}) {
+  const { rows } = await query(
+    `INSERT INTO device_events (device_id, scan_id, type, ip_address, changes, occurred_at)
+     VALUES ($1, $2, $3, $4, $5, COALESCE($6, now()))
+     RETURNING *`,
+    [deviceId, scanId, type, ipAddress, changes, occurredAt ?? null],
   );
   return rows[0];
 }

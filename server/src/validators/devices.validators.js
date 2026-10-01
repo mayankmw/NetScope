@@ -14,3 +14,26 @@ export const listDevicesSchemas = {
 export const discoverDevicesSchemas = {
   body: z.strictObject({}),
 };
+
+const deviceParams = z.strictObject({ deviceId: z.uuid() });
+
+/** GET /api/devices/:deviceId */
+export const getDeviceSchemas = {
+  params: deviceParams,
+  query: z.strictObject({}),
+};
+
+/**
+ * GET /api/devices/:deviceId/events and /observations: cursor pagination.
+ * `before` is the `nextCursor` of the previous page (an id, so a positive integer).
+ */
+export const listDeviceHistorySchemas = {
+  params: deviceParams,
+  query: z.strictObject({
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    before: z
+      .string()
+      .regex(/^[1-9]\d{0,18}$/, 'Expected a cursor returned by a previous page')
+      .optional(),
+  }),
+};

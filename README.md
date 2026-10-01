@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 5 of 12 — real-time updates. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 6 of 12 — device details. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -24,7 +24,7 @@ Details: [Architecture §5 — Network layer and safety model](docs/ARCHITECTURE
 
 - Device discovery with MAC vendor identification
 - Live device list and dashboard (WebSocket updates)
-- Device details and on-demand diagnostics (ping)
+- Device details: identity, network, presence, activity timeline, and discovery history
 - Safe port checks on a single device
 - Interactive network topology
 - Scan history and device presence timeline
@@ -126,11 +126,18 @@ them updates all the others (new devices, IP changes, devices going offline or c
 **Live** indicator in the top bar shows the connection; if it drops, NetScope reconnects on its
 own and reloads the list.
 
+Click any device (row, card, or its IP address) for its **details page**: status and how often
+discovery finds it, identity, network information (current and previous IPs, MAC details, the
+interface it is reached through, ping time), its activity timeline (first seen, offline, back
+online, IP or name changes), and every scan that saw it. It updates live too.
+
 From the command line:
 
 ```bash
 curl -s -X POST http://127.0.0.1:4000/api/devices/discover | python3 -m json.tool
 curl -s http://127.0.0.1:4000/api/devices | python3 -m json.tool
+curl -s http://127.0.0.1:4000/api/devices/<deviceId> | python3 -m json.tool
+curl -s "http://127.0.0.1:4000/api/devices/<deviceId>/events?limit=10" | python3 -m json.tool
 ```
 
 Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
@@ -187,7 +194,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 3. ✅ Device discovery
 4. ✅ Device list UI
 5. ✅ Live WebSocket updates
-6. Device details
+6. ✅ Device details
 7. Safe port scanning
 8. Network topology visualization
 9. Historical scans

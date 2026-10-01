@@ -62,3 +62,23 @@ export function formatRelativeTime(value, now = Date.now()) {
   }
   return relativeFormatter.format(Math.round(delta), 'year');
 }
+
+/**
+ * A ping round-trip time, e.g. "3.2 ms", "48 ms", "<1 ms".
+ * @param {number} ms
+ */
+export function formatLatency(ms) {
+  if (ms < 1) return '<1 ms';
+  return `${ms < 10 ? ms.toFixed(1) : Math.round(ms)} ms`;
+}
+
+/**
+ * A share as a whole percentage, e.g. "92%". Never shows 100% unless it is exactly 100%.
+ * @param {number} part
+ * @param {number} whole
+ */
+export function formatPercent(part, whole) {
+  if (whole <= 0) return '—';
+  const percent = (part / whole) * 100;
+  return `${part < whole ? Math.min(99, Math.round(percent)) : Math.round(percent)}%`;
+}

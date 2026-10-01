@@ -1,7 +1,7 @@
 import { EventTypes } from '@netscope/shared/events';
 import { describe, expect, it, vi } from 'vitest';
 import { createEvent, EventBus } from '../../src/events/eventBus.js';
-import { deriveDeviceEvents } from '../../src/services/deviceEvents.js';
+import { deriveDeviceEvents, toDeviceEventRecords } from '../../src/services/deviceEvents.js';
 
 describe('createEvent', () => {
   it('builds the shared envelope with a unique id', () => {
@@ -128,5 +128,35 @@ describe('deriveDeviceEvents', () => {
 
     expect(types(events)).toEqual([EventTypes.DEVICE_OFFLINE]);
     expect(events[0].data.device).toMatchObject({ id: 'gw', status: 'offline', isGateway: true });
+  });
+
+  it('turns each event into a timeline record with the same facts', () => {
+    const events = derive(
+      [
+        row({ id: 'new', is_new: true, previous_ip_address: null, previous_status: null }),
+        row({
+          previous_status: 'offline',
+          ip_address: '192.168.1.21',
+          previous_ip_address: '192.168.1.20',
+          previous_hostname: null,
+        }),
+      ],
+      [row({ id: 'gone', ip_address: '192.168.1.30', status: 'offline' })],
+    );
+
+    expect(toDeviceEventRecords(events)).toEqual([
+      { deviceId: 'new', type: 'discovered', ipAddress: '192.168.1.20', changes: {} },
+      { deviceId: 'd1', type: 'online', ipAddress: '192.168.1.21', changes: {} },
+      {
+        deviceId: 'd1',
+        type: 'updated',
+        ipAddress: '192.168.1.21',
+        changes: {
+          ipAddress: { from: '192.168.1.20', to: '192.168.1.21' },
+          hostname: { from: null, to: 'pi.lan' },
+        },
+      },
+      { deviceId: 'gone', type: 'offline', ipAddress: '192.168.1.30', changes: {} },
+    ]);
   });
 });

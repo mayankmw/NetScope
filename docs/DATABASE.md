@@ -1,7 +1,7 @@
 # NetScope Database
 
-> Status: **Step 2 — schema implemented.** Source of truth:
-> [`server/src/db/migrations/`](../server/src/db/migrations/).
+> Status: **Step 6.** Initial schema (Step 2) plus the device timeline (`device_events`, Step 6).
+> Source of truth: [`server/src/db/migrations/`](../server/src/db/migrations/).
 
 ## 1. Role
 
@@ -19,7 +19,8 @@ what each scan observed, open ports, and alerts. It is not used as a queue or a 
   normalize formatting (`A4-83-E7-…` is stored as `a4:83:e7:…`), and support subnet operators (`ip << cidr`).
 - **Closed sets that code depends on** (statuses, scan types, alert types) use `CHECK` constraints.
   **Open, user-facing categories** (device types) use a lookup table, so adding one is an `INSERT`.
-- `jsonb` only for genuinely variable data (`scans.params`, `alerts.context`), constrained to objects.
+- `jsonb` only for genuinely variable data (`scans.params`, `alerts.context`, `device_events.changes`),
+  constrained to objects.
 - Every foreign key states its `ON DELETE` behaviour. Foreign key columns used for joins and
   cascades are indexed. `devices.device_type` is not, because lookup rows are never deleted.
 - Invariants live in the database as well as in code: the gateway must be inside its subnet, a
@@ -37,6 +38,8 @@ erDiagram
   device_types ||--o{ devices : classifies
   devices ||--o{ device_observations : "seen in"
   scans ||--o{ device_observations : records
+  devices ||--o{ device_events : "timeline of"
+  scans ||--o{ device_events : detected
   devices ||--o{ device_ports : exposes
   device_ports ||--o{ port_scan_results : "state in"
   scans ||--o{ port_scan_results : records
@@ -51,7 +54,7 @@ The schema follows one pattern:
 | ------------------------------------ | ------------------------------------------ | ----------------------------------------- |
 | **Current state**: what is true now  | `networks`, `devices`, `device_ports`      | Mutable; updated as scans report          |
 | **Scan results**: what each scan saw | `device_observations`, `port_scan_results` | Append-only history, one row per scan hit |
-| **Runs and events**                  | `scans`, `alerts`                          | One row per run / per notable change      |
+| **Runs and events**                  | `scans`, `device_events`, `alerts`         | One row per run / per change              |
 | **Lookup**                           | `device_types`                             | Seeded, extensible                        |
 
 There is no single generic `scan_results` table. A discovery result ("device X was at IP Y,
@@ -65,6 +68,7 @@ would need nullable columns or untyped JSON, so each scan type writes to its own
 | `devices`             | Current state of each device                                     | Unique `(network_id, mac_address)`; host IPv4 only; type FK                                       |
 | `scans`               | One row per scan run (`discovery` or `port`)                     | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device |
 | `device_observations` | Discovery results: device seen by a scan, with its IP then       | Unique `(scan_id, device_id)`                                                                     |
+| `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)   | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history       |
 | `device_ports`        | TCP ports ever found open on a device                            | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                      |
 | `port_scan_results`   | Port results: state of a known port in one scan                  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                              |
 | `alerts`              | Notable changes (new device, offline, IP changed, new open port) | Type/severity checks; SET NULL on device/scan delete to keep history                              |
@@ -80,7 +84,9 @@ would need nullable columns or untyped JSON, so each scan type writes to its own
 | `scans_single_active_idx` (partial unique)                           | Enforces one queued/running scan                    |
 | `scans_network_created_idx`                                          | Scan history per network                            |
 | `scans_target_device_created_idx` (partial)                          | Latest port scan for a device                       |
-| `device_observations_device_observed_idx`                            | Device presence / IP timeline                       |
+| `device_observations_device_observed_idx`                            | Device presence / IP history; discovery history     |
+| `device_events_device_occurred_idx`                                  | A device's timeline, newest first (keyset paging)   |
+| `device_events_scan_idx` (partial)                                   | FK lookup when scans are purged                     |
 | `port_scan_results_port_observed_idx`                                | Port state history                                  |
 | `alerts_open_idx` (partial)                                          | Unacknowledged alerts (inbox, badge count)          |
 | `alerts_network_created_idx`, `alerts_device_idx`, `alerts_scan_idx` | Alert history; FK lookups                           |
@@ -114,6 +120,28 @@ Discovery repeatedly answers one question: **is this the same device we saw befo
   future "merge devices" action can combine the two rows. Stable `uuid` references make that possible.
 - `mac_address` is `NOT NULL`: a host on the local subnet that never resolved to a MAC cannot be
   identified reliably, so it is not recorded as a device.
+
+### Device timeline (`device_events`)
+
+Discovery already knows exactly what changed for each device (it compares each row before and
+after the upsert). Those facts are broadcast as `device.*` WebSocket events and, in the same
+transaction as the change, appended to `device_events`:
+
+| `type`       | When                                                  | `changes`                                 |
+| ------------ | ----------------------------------------------------- | ----------------------------------------- |
+| `discovered` | A new MAC on this network                             | `{}`                                      |
+| `online`     | Seen again after being offline                        | `{}`                                      |
+| `offline`    | Was online, not seen by a discovery that swept its IP | `{}`                                      |
+| `updated`    | IP address, hostname, vendor, or device type changed  | `{ "ipAddress": { "from": …, "to": … } }` |
+
+Storing the log, rather than reconstructing status changes from which scans saw a device, keeps
+one definition of "offline" (in discovery) and makes the timeline a cheap indexed read.
+`ip_address` records where the device was at the time.
+
+The migration that created the table back-filled it from existing data: `discovered` at each
+device's `first_seen_at`, `online`/`offline` from which completed discoveries saw the device, and
+`updated` from consecutive observations at different IPs. Hostname, vendor, and type changes
+before Step 6 were not recorded.
 
 ## 5. Migrations
 
@@ -153,5 +181,6 @@ automatically before the suite runs.
 ## 8. Growth and retention
 
 `device_observations` grows by roughly devices × scans: 50 devices scanned every 5 minutes is
-about 14k rows/day, which is small for PostgreSQL. A retention purge (`DATA_RETENTION_DAYS`)
+about 14k rows/day, which is small for PostgreSQL. `device_events` grows only with changes
+(mostly phones and laptops coming and going). A retention purge (`DATA_RETENTION_DAYS`)
 arrives with scheduled scans in Step 9.

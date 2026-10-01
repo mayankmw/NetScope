@@ -68,15 +68,17 @@ function toApiError(response, payload) {
 
 /**
  * Sends a JSON request to the NetScope API and unwraps the response envelope.
- * Resolves with `data` on success; rejects with ApiError otherwise. If the caller's
- * `signal` aborts, the native AbortError is rethrown so callers can ignore it.
+ * Resolves with `data` on success (`{ data, meta }` with `includeMeta`, for paginated lists);
+ * rejects with ApiError otherwise. If the caller's `signal` aborts, the native AbortError is
+ * rethrown so callers can ignore it.
  *
  * @param {string} path Path relative to the API base, e.g. "/health".
- * @param {{ method?: string, body?: unknown, signal?: AbortSignal, timeoutMs?: number }} [options]
+ * @param {{ method?: string, body?: unknown, signal?: AbortSignal, timeoutMs?: number,
+ *           includeMeta?: boolean }} [options]
  */
 async function request(
   path,
-  { method = 'GET', body, signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {},
+  { method = 'GET', body, signal, timeoutMs = DEFAULT_TIMEOUT_MS, includeMeta = false } = {},
 ) {
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combinedSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
@@ -112,7 +114,7 @@ async function request(
   if (!response.ok || payload?.success !== true) {
     throw toApiError(response, payload);
   }
-  return payload.data;
+  return includeMeta ? { data: payload.data, meta: payload.meta ?? {} } : payload.data;
 }
 
 export const apiClient = Object.freeze({

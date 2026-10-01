@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatRelativeTime } from './format';
+import { formatDuration, formatLatency, formatPercent, formatRelativeTime } from './format';
 import { compareIp } from './ip';
 
 describe('formatRelativeTime', () => {
@@ -31,5 +31,24 @@ describe('compareIp', () => {
       '10.0.0.9',
       '10.0.0.10',
     ]);
+  });
+});
+
+describe('formatLatency', () => {
+  it.each([
+    [0.4, '<1 ms'],
+    [4.25, '4.3 ms'],
+    [48.6, '49 ms'],
+  ])('%s → %s', (ms, expected) => {
+    expect(formatLatency(ms)).toBe(expected);
+  });
+});
+
+describe('formatPercent', () => {
+  it('rounds, but never shows a partial share as 100%', () => {
+    expect(formatPercent(11, 12)).toBe('92%');
+    expect(formatPercent(199, 200)).toBe('99%');
+    expect(formatPercent(12, 12)).toBe('100%');
+    expect(formatPercent(0, 0)).toBe('—');
   });
 });

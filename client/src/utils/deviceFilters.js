@@ -91,6 +91,15 @@ export function deviceDisplayName(device) {
   return device.displayName || device.hostname || null;
 }
 
+/** The name of a device, never empty: display name, hostname, or a description of it. */
+export function deviceTitle(device) {
+  const name = deviceDisplayName(device);
+  if (name) return name;
+  if (device.isSelf) return 'This computer';
+  if (device.isGateway) return device.vendor ? `${device.vendor} gateway` : 'Gateway';
+  return device.vendor ? `${device.vendor} device` : 'Unknown device';
+}
+
 /** First seen within the last 24 hours. */
 export function isNewDevice(device, now = Date.now()) {
   return now - new Date(device.firstSeenAt).getTime() < NEW_DEVICE_WINDOW_MS;

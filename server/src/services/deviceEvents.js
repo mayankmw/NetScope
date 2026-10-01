@@ -66,3 +66,35 @@ export function deriveDeviceEvents({ networkId, gatewayMac, upserted, wentOfflin
 
   return events;
 }
+
+/** WebSocket event type → device_events.type. */
+const RECORD_TYPES = {
+  [EventTypes.DEVICE_DISCOVERED]: 'discovered',
+  [EventTypes.DEVICE_ONLINE]: 'online',
+  [EventTypes.DEVICE_OFFLINE]: 'offline',
+  [EventTypes.DEVICE_UPDATED]: 'updated',
+};
+
+/**
+ * The same facts as rows for the device_events log, so each device's timeline records exactly
+ * what clients were told live. Pure.
+ *
+ * @param {Array<{ type: string, data: any }>} events from deriveDeviceEvents
+ * @returns {Array<import('../db/repositories/deviceEvents.repository.js').DeviceEventRecord>}
+ */
+export function toDeviceEventRecords(events) {
+  return events.map(({ type, data }) => ({
+    deviceId: data.device.id,
+    type: RECORD_TYPES[type],
+    ipAddress: data.device.ipAddress,
+    changes:
+      type === EventTypes.DEVICE_UPDATED
+        ? Object.fromEntries(
+            data.changes.map((field) => [
+              field,
+              { from: data.previous[field], to: data.device[field] },
+            ]),
+          )
+        : {},
+  }));
+}

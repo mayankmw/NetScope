@@ -1,5 +1,6 @@
 import { EventTypes } from '@netscope/shared/events';
 import { config } from '../config/index.js';
+import * as deviceEventsRepository from '../db/repositories/deviceEvents.repository.js';
 import * as devicesRepository from '../db/repositories/devices.repository.js';
 import * as networksRepository from '../db/repositories/networks.repository.js';
 import * as scansRepository from '../db/repositories/scans.repository.js';
@@ -9,7 +10,7 @@ import { ErrorCodes } from '../errors/errorCodes.js';
 import { eventBus } from '../events/eventBus.js';
 import * as network from '../network/index.js';
 import { logger } from '../utils/logger.js';
-import { deriveDeviceEvents } from './deviceEvents.js';
+import { deriveDeviceEvents, toDeviceEventRecords } from './deviceEvents.js';
 import { toDeviceDto } from './dto.js';
 
 const { NetworkError, NetworkErrorCodes } = network;
@@ -86,7 +87,8 @@ function toDeviceResponse(row, device) {
  * Discovers the devices currently visible on the local network and records them.
  *
  * Flow: detect network → record scan → ping sweep → nmap (optional) → ARP cache → merge by MAC
- *       → vendor + hostname + type → persist (one transaction) → events → response.
+ *       → vendor + hostname + type → persist with device timelines (one transaction) → events
+ *       → response.
  *
  * Events (published on the event bus, broadcast to WebSocket clients):
  *   discovery.started once the scan is recorded; device.* and discovery.completed only after the
@@ -248,7 +250,8 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
       }),
     );
 
-    // 5. Persist everything atomically: devices, observations, offline marks, scan completion.
+    // 5. Persist everything atomically: devices, observations, offline marks, each device's
+    //    timeline (device_events), and scan completion.
     signal.throwIfAborted();
     const persisted = await withTransaction(async (client) => {
       const saved = [];
@@ -270,11 +273,21 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
         sweptRange: detected.sweepCidr,
         seenDeviceIds: saved.map((device) => device.id),
       });
+      const deviceEvents = deriveDeviceEvents({
+        networkId: networkRow.id,
+        gatewayMac: detected.gatewayMac,
+        upserted,
+        wentOffline,
+      });
+      await deviceEventsRepository.insertDeviceEvents(client, {
+        scanId: scan.id,
+        events: toDeviceEventRecords(deviceEvents),
+      });
       const completed = await scansRepository.completeScan(client, scan.id);
-      return { saved, upserted, wentOffline, completed };
+      return { saved, wentOffline, deviceEvents, completed };
     });
 
-    const { saved, upserted, wentOffline, completed } = persisted;
+    const { saved, wentOffline, deviceEvents, completed } = persisted;
     for (const device of saved) {
       if (device.isNew) {
         log.info(
@@ -300,12 +313,6 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     log.info({ durationMs, ...summary }, 'Discovery: completed');
 
     // Committed: tell connected clients what changed, then that the run is over.
-    const deviceEvents = deriveDeviceEvents({
-      networkId: networkRow.id,
-      gatewayMac: detected.gatewayMac,
-      upserted,
-      wentOffline,
-    });
     for (const { type, data } of deviceEvents) eventBus.publish(type, data);
     eventBus.publish(EventTypes.DISCOVERY_COMPLETED, {
       scanId: scan.id,

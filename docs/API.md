@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 5.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, and the WebSocket event stream are implemented. Everything else is the plan, and
+> Status: **Step 6.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events` and `observations` histories), and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -31,7 +31,7 @@ Every response has the same three top-level keys: `success`, `data`, and `error`
 }
 ```
 
-Paginated lists add `"meta": { "page": 1, "pageSize": 50, "total": 42, "totalPages": 1 }`.
+Paginated lists add `meta`: `{ "limit": 20, "nextCursor": "1234" }` for cursor pagination (see §5).
 
 **Failure:** `data` is always `null`.
 
@@ -98,7 +98,12 @@ The client adds its own codes when no envelope is available: `NETWORK_ERROR`, `T
 
 ## 5. Collections
 
-- **Pagination** — `?page=1&pageSize=50` (max 200) → `meta: { page, pageSize, total, totalPages }`.
+- **Pagination of histories** (append-only, newest first: device timeline, discovery history) —
+  cursor based: `?limit=20` (1–100, default 20), then `?before=<nextCursor>` for the next page →
+  `meta: { limit, nextCursor }`; `nextCursor` is `null` on the last page. Entries added while
+  paging never shift pages, so nothing is skipped or repeated. Cursors are opaque strings.
+- **Pagination of other collections** — `?page=1&pageSize=50` (max 200) →
+  `meta: { page, pageSize, total, totalPages }` (none yet: the inventory is returned whole).
 - **Filtering** — explicit, validated query params: `?status=online&search=printer`.
 - **Sorting** — `?sort=-lastSeenAt` (leading `-` = descending); only allowlisted fields.
 
@@ -313,6 +318,146 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
 `sources.*.status` is `ok`, `unavailable` (tool missing), `failed` (ran but errored), or
 `skipped` (disabled). Only an unreadable ARP cache fails the whole discovery.
 
+### `GET /api/devices/:deviceId`
+
+Everything the details page shows about one device, apart from its paginated histories: the
+device, its network (with the last completed scan), its presence, every IP address it has used,
+and, when the device is the machine NetScope runs on, that machine's network interface.
+
+```json
+{
+  "success": true,
+  "data": {
+    "device": {
+      "id": "8f2c1d3e-6b7a-4c9d-8e1f-2a3b4c5d6e7f",
+      "ipAddress": "192.168.1.21",
+      "macAddress": "b8:27:eb:12:34:56",
+      "macIsRandom": false,
+      "hostname": "raspberrypi.lan",
+      "vendor": "Raspberry Pi Foundation",
+      "deviceType": "computer",
+      "displayName": null,
+      "isTrusted": false,
+      "status": "online",
+      "isGateway": false,
+      "isSelf": false,
+      "firstSeenAt": "2026-09-20T08:12:03.114Z",
+      "lastSeenAt": "2026-10-01T09:12:45.929Z",
+      "updatedAt": "2026-10-01T09:12:45.929Z"
+    },
+    "network": { "id": "5c50d134-…", "cidr": "192.168.1.0/24", "interfaceName": "en0", "…": "…" },
+    "presence": {
+      "statusSince": "2026-10-01T07:40:00.000Z",
+      "timesSeen": 11,
+      "scansSinceFirstSeen": 12,
+      "lastLatencyMs": 4.2,
+      "averageLatencyMs": 5.1,
+      "latencySamples": 11
+    },
+    "ipHistory": [
+      {
+        "ipAddress": "192.168.1.21",
+        "firstSeenAt": "2026-10-01T07:40:00.000Z",
+        "lastSeenAt": "2026-10-01T09:12:45.929Z",
+        "timesSeen": 3
+      },
+      {
+        "ipAddress": "192.168.1.20",
+        "firstSeenAt": "2026-09-20T08:12:03.114Z",
+        "lastSeenAt": "2026-10-01T06:30:12.000Z",
+        "timesSeen": 8
+      }
+    ],
+    "localInterface": null
+  },
+  "error": null
+}
+```
+
+| Field                          | Meaning                                                                                               |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `device.isSelf`                | The device is the machine NetScope runs on (its MAC belongs to one of this machine's interfaces)      |
+| `presence.statusSince`         | When the current status began (latest discovered / online / offline event); `null` without a timeline |
+| `presence.timesSeen`           | Discovery scans that saw the device                                                                   |
+| `presence.scansSinceFirstSeen` | Completed discoveries of its network since it first appeared, including the one that found it         |
+| `presence.lastLatencyMs`       | Ping reply time when last seen; `null` if it did not answer ping (found through ARP or nmap)          |
+| `presence.averageLatencyMs`    | Average over its `latencySamples` most recent ping replies (at most 20)                               |
+| `ipHistory`                    | Addresses the device has used, most recently used first (at most 10)                                  |
+| `localInterface`               | Only when `isSelf`: `{ name, macAddress, addresses: [{ family, address, cidr }] }` from the OS        |
+
+Errors: `400 VALIDATION_ERROR` (malformed `deviceId` or any query parameter), `404 NOT_FOUND`
+(`details.deviceId`), `503 DATABASE_UNAVAILABLE`.
+
+### `GET /api/devices/:deviceId/events`
+
+The device's timeline, newest first: when it was first discovered, went offline, came back
+online, and changes to its IP address, hostname, vendor, or type. Discovery records these in the
+same transaction as the change, and they match the `device.*` WebSocket events. Cursor-paginated
+(§5): `?limit=20&before=<nextCursor>`.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "42",
+      "type": "updated",
+      "occurredAt": "2026-10-01T07:40:00.000Z",
+      "ipAddress": "192.168.1.21",
+      "changes": { "ipAddress": { "from": "192.168.1.20", "to": "192.168.1.21" } },
+      "scanId": "75966ed9-3a30-4bf8-8847-f7028d8d16e0"
+    },
+    {
+      "id": "41",
+      "type": "online",
+      "occurredAt": "2026-10-01T07:40:00.000Z",
+      "ipAddress": "192.168.1.21",
+      "changes": {},
+      "scanId": "75966ed9-3a30-4bf8-8847-f7028d8d16e0"
+    }
+  ],
+  "error": null,
+  "meta": { "limit": 2, "nextCursor": "41" }
+}
+```
+
+| Field       | Meaning                                                                                       |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| `type`      | `discovered`, `online`, `offline`, or `updated`                                               |
+| `ipAddress` | The device's address when it happened (for `offline`: its last known address)                 |
+| `changes`   | `updated` only: `{ field: { from, to } }` for `ipAddress`, `hostname`, `vendor`, `deviceType` |
+| `scanId`    | The discovery that detected it; `null` once that scan has been purged                         |
+
+Errors: `400 VALIDATION_ERROR` (malformed `deviceId`, `limit` outside 1–100, malformed `before`,
+unknown parameter), `404 NOT_FOUND`, `503 DATABASE_UNAVAILABLE`.
+
+### `GET /api/devices/:deviceId/observations`
+
+The device's discovery history, newest first: each discovery scan that saw it, with its address,
+DNS name, and ping time in that scan. Same pagination and errors as `/events`.
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "1207",
+      "observedAt": "2026-10-01T09:12:45.929Z",
+      "ipAddress": "192.168.1.21",
+      "hostname": "raspberrypi.lan",
+      "latencyMs": 4.2,
+      "scanId": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+      "triggeredBy": "manual"
+    }
+  ],
+  "error": null,
+  "meta": { "limit": 20, "nextCursor": null }
+}
+```
+
+`latencyMs` is `null` when the device did not answer ping in that scan; `hostname` is `null` when
+that scan resolved no name. `triggeredBy` is `manual` or `schedule` (Step 9).
+
 ## 7. WebSocket
 
 Live events at `ws://<host>:<port>/ws` (`WS_PATH`), on the API's own port. In development the UI
@@ -411,15 +556,16 @@ reconnect (with backoff), then reload state over REST.
 
 ### `/api/devices`
 
-| Method & path                                  | Step | Purpose                                                |
-| ---------------------------------------------- | ---- | ------------------------------------------------------ |
-| `POST /api/devices/discover`                   | 3 ✅ | Run discovery (implemented, see above)                 |
-| `GET /api/devices`                             | 4 ✅ | Device inventory (implemented, see above)              |
-| `GET /api/devices/:deviceId`                   | 6    | Device details                                         |
-| `PATCH /api/devices/:deviceId`                 | 6    | Edit `displayName`, `notes`, `deviceType`, `isTrusted` |
-| `POST /api/devices/:deviceId/diagnostics/ping` | 6    | On-demand ping (latency, loss)                         |
-| `GET /api/devices/:deviceId/ports`             | 7    | Latest port-check results                              |
-| `GET /api/devices/:deviceId/history`           | 9    | Presence and IP timeline                               |
+| Method & path                                  | Step  | Purpose                                                |
+| ---------------------------------------------- | ----- | ------------------------------------------------------ |
+| `POST /api/devices/discover`                   | 3 ✅  | Run discovery (implemented, see above)                 |
+| `GET /api/devices`                             | 4 ✅  | Device inventory (implemented, see above)              |
+| `GET /api/devices/:deviceId`                   | 6 ✅  | Device details (implemented, see above)                |
+| `GET /api/devices/:deviceId/events`            | 6 ✅  | Device timeline (implemented, see above)               |
+| `GET /api/devices/:deviceId/observations`      | 6 ✅  | Discovery history (implemented, see above)             |
+| `GET /api/devices/:deviceId/ports`             | 7     | Latest port-check results                              |
+| `PATCH /api/devices/:deviceId`                 | later | Edit `displayName`, `notes`, `deviceType`, `isTrusted` |
+| `POST /api/devices/:deviceId/diagnostics/ping` | later | On-demand ping (latency, loss)                         |
 
 ### `/api/scans`
 

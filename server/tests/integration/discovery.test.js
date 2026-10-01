@@ -283,6 +283,33 @@ describe('POST /api/devices/discover', () => {
     expect(again.rows[0].status).toBe('online');
   });
 
+  it("records every change on the device's timeline", async () => {
+    const first = await discover().expect(200);
+    const pi = first.body.data.devices.find((device) => device.macAddress === PI_MAC);
+
+    scenario.current = makeScenario({ piIp: null });
+    await discover().expect(200); // offline
+    scenario.current = makeScenario({ piIp: '192.168.50.21' });
+    await discover().expect(200); // back online, at a new address
+
+    const timeline = await request(app).get(`/api/devices/${pi.id}/events`).expect(200);
+    expect(timeline.body.data.map((event) => [event.type, event.ipAddress, event.changes])).toEqual(
+      [
+        ['updated', '192.168.50.21', { ipAddress: { from: '192.168.50.20', to: '192.168.50.21' } }],
+        ['online', '192.168.50.21', {}],
+        ['offline', '192.168.50.20', {}],
+        ['discovered', '192.168.50.20', {}],
+      ],
+    );
+
+    const details = await request(app).get(`/api/devices/${pi.id}`).expect(200);
+    expect(details.body.data.presence).toMatchObject({ timesSeen: 2, scansSinceFirstSeen: 3 });
+    expect(details.body.data.ipHistory.map((entry) => entry.ipAddress)).toEqual([
+      '192.168.50.21',
+      '192.168.50.20',
+    ]);
+  });
+
   it('never overwrites what the user set, or data this scan could not see', async () => {
     await discover().expect(200);
     await query(

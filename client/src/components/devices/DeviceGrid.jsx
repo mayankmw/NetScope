@@ -4,26 +4,41 @@ import { GlassPanel } from '@/components/common/GlassPanel';
 import { deviceTypeLabel } from '@/constants/deviceTypes';
 import { cn } from '@/lib/utils';
 import { DeviceName, DeviceTags, IpChangedMarker, PrivateMacTag } from './DeviceAttributes';
+import { DeviceLink } from './DeviceLink';
 import { DeviceStatusBadge } from './DeviceStatusBadge';
 import { DeviceTypeAvatar } from './DeviceTypeLabel';
 
-/** One device as a card (phones and small tablets). */
+/**
+ * One device as a card (phones and small tablets). The whole card opens the device's details:
+ * its title link is stretched over it, and the controls inside sit above that link.
+ */
 export function DeviceCard({ device, now, previousIp, changed = false }) {
   const online = device.status === 'online';
   return (
     <GlassPanel
       as="article"
-      className={cn('space-y-3 p-4', !online && 'opacity-80', changed && 'animate-live-ring')}
+      className={cn(
+        'relative space-y-3 p-4 transition-colors hover:border-primary/30 has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-ring',
+        !online && 'opacity-80',
+        changed && 'animate-live-ring',
+      )}
     >
       <div className="flex items-start gap-3">
         <DeviceTypeAvatar type={device.deviceType} online={online} />
         <div className="min-w-0 flex-1">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
-            <DeviceName device={device} className="truncate" fallback />
+            <DeviceLink
+              deviceId={device.id}
+              className="min-w-0 truncate outline-none after:absolute after:inset-0 after:rounded-xl"
+            >
+              <DeviceName device={device} fallback />
+            </DeviceLink>
           </h3>
           <p className="mt-0.5 inline-flex items-center gap-1 font-mono text-[13px] tabular-nums">
             {device.ipAddress}
-            <IpChangedMarker previousIp={previousIp} />
+            <span className="relative z-10 inline-flex">
+              <IpChangedMarker previousIp={previousIp} />
+            </span>
           </p>
         </div>
         <DeviceStatusBadge status={device.status} />
@@ -33,7 +48,9 @@ export function DeviceCard({ device, now, previousIp, changed = false }) {
         <div className="col-span-2 flex min-w-0 items-center gap-2">
           <dt className="sr-only">MAC address</dt>
           <dd className="truncate font-mono text-muted-foreground">{device.macAddress}</dd>
-          <PrivateMacTag device={device} />
+          <span className="relative z-10 inline-flex">
+            <PrivateMacTag device={device} />
+          </span>
         </div>
         <div className="min-w-0">
           <dt className="text-muted-foreground">Vendor</dt>
@@ -57,7 +74,7 @@ export function DeviceCard({ device, now, previousIp, changed = false }) {
         </div>
       </dl>
 
-      <div className="flex flex-wrap gap-1.5 empty:hidden">
+      <div className="relative z-10 flex w-fit flex-wrap gap-1.5 empty:hidden">
         <DeviceTags device={device} now={now} />
       </div>
     </GlassPanel>

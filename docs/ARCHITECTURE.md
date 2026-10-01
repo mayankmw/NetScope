@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 5 — real-time updates.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 6 — device details.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -69,10 +69,13 @@ netscope/
 │   │   │   ├── ui/                shadcn/ui primitives (generated — do not hand-edit)
 │   │   │   ├── common/            GlassPanel, PageHeader, StatCard, EmptyState, ErrorState,
 │   │   │   │                      StatusDot, Tag, RelativeTime, SearchInput, SegmentedControl,
-│   │   │   │                      FilterMenu, Toaster
+│   │   │   │                      FilterMenu, Toaster, PageFallback, DetailList, CopyButton
 │   │   │   ├── layout/            Sidebar, SidebarNav, MobileNav, TopBar, Brand, ScanProgressBar
 │   │   │   ├── devices/           DeviceTable, DeviceGrid/Card, DeviceToolbar, DiscoverButton,
-│   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, attributes, skeleton
+│   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, DeviceLink, attributes,
+│   │   │   │                      skeleton
+│   │   │   ├── device-details/    DeviceHeader, DeviceStatus, DeviceIdentityCard,
+│   │   │   │                      DeviceNetworkCard, DeviceActivity, DeviceMetadata, skeleton
 │   │   │   ├── network/           NetworkPanel
 │   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
 │   │   │   ├── topology/          (8) Cytoscape graph wrapper
@@ -80,15 +83,19 @@ netscope/
 │   │   ├── config/                env.js — the only reader of import.meta.env
 │   │   ├── constants/             deviceTypes.js (labels for device_types codes)
 │   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
-│   │   │                          useSystemHealth, useMediaQuery, useNow, useKeyboardShortcut
+│   │   │                          useDeviceDetails, useOpenDevice, useRealtime, useSystemHealth,
+│   │   │                          useMediaQuery, useNow, useKeyboardShortcut
 │   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
 │   │   ├── lib/                   shadcn `cn` helper
-│   │   ├── pages/                 DashboardPage, DevicesPage, NotFoundPage, RouteErrorPage
-│   │   ├── services/              apiClient, deviceService, healthService; socketClient (5)
-│   │   ├── stores/                useDeviceStore, useSystemStore, useUiStore (Zustand)
+│   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, NotFoundPage,
+│   │   │                          RouteErrorPage
+│   │   ├── services/              apiClient, deviceService, healthService, realtimeClient
+│   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, useConnectionStore,
+│   │   │                          useSystemStore, useUiStore (Zustand)
 │   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
 │   │   ├── types/                 JSDoc typedefs for API contracts
-│   │   ├── utils/                 deviceFilters (search/filter/sort/URL), format, ip
+│   │   ├── utils/                 deviceFilters (search/filter/sort/URL), deviceActivity (timeline
+│   │   │                          text), deviceLinks, format, ids, ip, mac
 │   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
@@ -356,6 +363,8 @@ Imports use the `@/` alias (`@/services/apiClient`).
 | ------------------------------------ | ---------------------------------------------------------------------------- |
 | Ephemeral UI (menu open, input text) | Component `useState`                                                         |
 | Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`  |
+| The device on the details page       | `useDeviceDetailsStore`: details, timeline, and discovery history pages      |
+| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)             |
 | API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard        |
 | UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)       |
 | Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable |
@@ -371,8 +380,14 @@ selectors to limit re-renders.
   inventory (the discovery response omits devices that went offline).
 - Search, filtering, and sorting run client-side in pure functions (`utils/deviceFilters.js`): a
   network holds at most ~1,000 devices, so no server-side pagination is needed.
+- `useDeviceDetailsStore` holds one device at a time. `open(id)` loads the details and the first
+  page of both histories in parallel; each part has its own loading and error state, so a failed
+  history does not hide the device. Real-time events about that device update it at once (newer
+  `updatedAt` only) and schedule one background refresh shortly after, which puts new history
+  entries on top of the pages already loaded. Leaving the page cancels requests but keeps the
+  data, so going back is instant. A malformed id is "not found" without a request.
 
-Planned stores: `useScanStore`, `useAlertStore`, `useConnectionStore` (Steps 5–10). TanStack Query
+Planned stores: `useScanStore`, `useAlertStore` (Steps 9–10). TanStack Query
 is deliberately not used: most data will arrive by server push into shared entity state, and
 Zustand covers both push and fetch with one model.
 
@@ -409,7 +424,7 @@ Zustand covers both push and fetch with one model.
 | -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------ |
 | `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
 | `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
-| `/devices/:deviceId` | `DeviceDetailsPage` | 6     | Identity, history, diagnostics, ports                                                      |
+| `/devices/:deviceId` | `DeviceDetailsPage` | 6     | Status, identity, network, activity (timeline, discovery history), metadata; ports (7)     |
 | `/topology`          | `TopologyPage`      | 8     | Interactive network map                                                                    |
 | `/scans`             | `ScansPage`         | 9     | Scan history                                                                               |
 | `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found / changed                                                                |
@@ -556,20 +571,22 @@ defaults for later steps are proposals, finalized in their step.
 
 ## 11. Decision log
 
-| #   | Decision                                       | Rationale                                                                                                                                                      | Revisit when                                                             |
-| --- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| 1   | npm workspaces monorepo                        | One install/lockfile/CI; Turborepo/Nx unnecessary at this size.                                                                                                | Build times hurt.                                                        |
-| 2   | JavaScript + JSDoc typedefs, not TypeScript    | Project rule. JSDoc gives editor types for contracts with no build step.                                                                                       | Shared API/WS contracts grow enough that compile-time checking pays off. |
-| 3   | Express 5                                      | Native async error propagation; mature ecosystem.                                                                                                              | —                                                                        |
-| 4   | zod for all validation                         | One library for env, HTTP input, and WS messages.                                                                                                              | —                                                                        |
-| 5   | REST for commands, WebSocket for push only     | One validated write path; WS stays simple; snapshot + delta handles reconnects.                                                                                | —                                                                        |
-| 6   | `ws` over Socket.IO                            | Standard protocol, native browser client, no fallbacks needed on a LAN; reconnect and channels are ~100 lines.                                                 | We need rooms across multiple server instances.                          |
-| 7   | `pg` + SQL migrations over an ORM              | Native `inet` / `cidr` / `macaddr` types, explicit SQL, no codegen. Implemented in Step 2 (node-pg-migrate, SQL files).                                        | Query complexity makes a query builder worthwhile.                       |
-| 8   | In-process job runner                          | Single host, one scan at a time; Redis/BullMQ would be operational overhead.                                                                                   | Multiple workers or durable queues are needed.                           |
-| 9   | Loopback bind by default, auth in Step 12      | A scanning API must not be reachable from the LAN without authentication.                                                                                      | —                                                                        |
-| 10  | Server runs on the host, not in Docker Desktop | On macOS/Windows containers live in a NAT'd VM and cannot see the LAN at layer 2. On Linux, `network_mode: host` works. PostgreSQL can run in Docker anywhere. | —                                                                        |
-| 11  | No root, TCP-connect techniques only           | Least privilege; the ARP cache supplies MACs without raw sockets.                                                                                              | —                                                                        |
-| 12  | Same origin for UI and API                     | No CORS in normal operation; cookies work; the client bundle holds no environment-specific URLs.                                                               | —                                                                        |
-| 13  | React Router 7 (not 8)                         | v8 requires Node ≥ 22.22; the project currently targets Node 22.13. API used (data mode) is the same.                                                          | Node is upgraded (Node 24 LTS recommended).                              |
-| 14  | shadcn/ui on Radix primitives, Nova preset     | Accessible, battle-tested primitives; components are owned source, not a dependency.                                                                           | —                                                                        |
-| 15  | Vitest everywhere                              | One runner and API for server and client.                                                                                                                      | —                                                                        |
+| #   | Decision                                       | Rationale                                                                                                                                                                     | Revisit when                                                             |
+| --- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| 1   | npm workspaces monorepo                        | One install/lockfile/CI; Turborepo/Nx unnecessary at this size.                                                                                                               | Build times hurt.                                                        |
+| 2   | JavaScript + JSDoc typedefs, not TypeScript    | Project rule. JSDoc gives editor types for contracts with no build step.                                                                                                      | Shared API/WS contracts grow enough that compile-time checking pays off. |
+| 3   | Express 5                                      | Native async error propagation; mature ecosystem.                                                                                                                             | —                                                                        |
+| 4   | zod for all validation                         | One library for env, HTTP input, and WS messages.                                                                                                                             | —                                                                        |
+| 5   | REST for commands, WebSocket for push only     | One validated write path; WS stays simple; snapshot + delta handles reconnects.                                                                                               | —                                                                        |
+| 6   | `ws` over Socket.IO                            | Standard protocol, native browser client, no fallbacks needed on a LAN; reconnect and channels are ~100 lines.                                                                | We need rooms across multiple server instances.                          |
+| 7   | `pg` + SQL migrations over an ORM              | Native `inet` / `cidr` / `macaddr` types, explicit SQL, no codegen. Implemented in Step 2 (node-pg-migrate, SQL files).                                                       | Query complexity makes a query builder worthwhile.                       |
+| 8   | In-process job runner                          | Single host, one scan at a time; Redis/BullMQ would be operational overhead.                                                                                                  | Multiple workers or durable queues are needed.                           |
+| 9   | Loopback bind by default, auth in Step 12      | A scanning API must not be reachable from the LAN without authentication.                                                                                                     | —                                                                        |
+| 10  | Server runs on the host, not in Docker Desktop | On macOS/Windows containers live in a NAT'd VM and cannot see the LAN at layer 2. On Linux, `network_mode: host` works. PostgreSQL can run in Docker anywhere.                | —                                                                        |
+| 11  | No root, TCP-connect techniques only           | Least privilege; the ARP cache supplies MACs without raw sockets.                                                                                                             | —                                                                        |
+| 12  | Same origin for UI and API                     | No CORS in normal operation; cookies work; the client bundle holds no environment-specific URLs.                                                                              | —                                                                        |
+| 13  | React Router 7 (not 8)                         | v8 requires Node ≥ 22.22; the project currently targets Node 22.13. API used (data mode) is the same.                                                                         | Node is upgraded (Node 24 LTS recommended).                              |
+| 14  | shadcn/ui on Radix primitives, Nova preset     | Accessible, battle-tested primitives; components are owned source, not a dependency.                                                                                          | —                                                                        |
+| 15  | Vitest everywhere                              | One runner and API for server and client.                                                                                                                                     | —                                                                        |
+| 16  | Device timeline as a stored event log          | `device_events` is written in the discovery transaction from the same facts as the WebSocket events. Deriving status changes from scans would duplicate offline rules in SQL. | —                                                                        |
+| 17  | Cursor pagination for device histories         | Append-only, newest-first lists that grow while being read: a `before` cursor never skips or repeats entries, unlike page numbers, and needs no `COUNT`.                      | —                                                                        |

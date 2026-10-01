@@ -60,6 +60,61 @@
  * @property {boolean} [isGateway]
  * @property {string} firstSeenAt ISO 8601
  * @property {string} lastSeenAt ISO 8601
+ * @property {string} [updatedAt] ISO 8601; orders real-time updates
+ */
+
+/**
+ * @typedef {object} DevicePresence
+ * @property {string | null} statusSince when the current status began
+ * @property {number} timesSeen discovery scans that saw the device
+ * @property {number} scansSinceFirstSeen completed discoveries of its network since first seen
+ * @property {number | null} lastLatencyMs ping reply time in the latest scan that saw it
+ * @property {number | null} averageLatencyMs over the most recent ping replies
+ * @property {number} latencySamples
+ */
+
+/**
+ * @typedef {object} LocalInterface the NetScope host's own interface (device.isSelf)
+ * @property {string} name e.g. "en0"
+ * @property {string} macAddress
+ * @property {Array<{ family: 'IPv4' | 'IPv6', address: string, cidr: string | null }>} addresses
+ */
+
+/**
+ * @typedef {object} DeviceDetails GET /api/devices/:deviceId
+ * @property {Device & { isGateway: boolean, isSelf: boolean, updatedAt: string }} device
+ * @property {Network} network
+ * @property {DevicePresence} presence
+ * @property {Array<{ ipAddress: string, firstSeenAt: string, lastSeenAt: string, timesSeen: number }>} ipHistory
+ * @property {LocalInterface | null} localInterface
+ */
+
+/**
+ * @typedef {object} DeviceEvent one entry of a device's timeline
+ * @property {string} id also the pagination cursor
+ * @property {'discovered' | 'online' | 'offline' | 'updated'} type
+ * @property {string} occurredAt
+ * @property {string} ipAddress the device's IP at the time
+ * @property {Record<string, { from: unknown, to: unknown }>} changes 'updated' only
+ * @property {string | null} scanId
+ */
+
+/**
+ * @typedef {object} Observation a discovery scan that saw the device
+ * @property {string} id also the pagination cursor
+ * @property {string} observedAt
+ * @property {string} ipAddress
+ * @property {string | null} hostname
+ * @property {number | null} latencyMs null when the device did not answer ping
+ * @property {string} scanId
+ * @property {'manual' | 'schedule'} triggeredBy
+ */
+
+/**
+ * @template T
+ * @typedef {object} Page
+ * @property {T[]} items
+ * @property {string | null} nextCursor null on the last page
  */
 
 /**

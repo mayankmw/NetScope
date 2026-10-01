@@ -1,4 +1,11 @@
-import { ArrowRightLeft, Router, Sparkles, VenetianMask } from 'lucide-react';
+import {
+  ArrowRightLeft,
+  MonitorCheck,
+  Router,
+  ShieldCheck,
+  Sparkles,
+  VenetianMask,
+} from 'lucide-react';
 import { Tag } from '@/components/common/Tag';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -35,6 +42,28 @@ export function DeviceTags({ device, now }) {
         </WithTooltip>
       )}
     </>
+  );
+}
+
+/** Marker for the machine NetScope runs on (details page only: the inventory does not know). */
+export function SelfTag({ device }) {
+  if (!device.isSelf) return null;
+  return (
+    <WithTooltip label="The computer NetScope is running on">
+      <Tag tone="success" icon={MonitorCheck} tabIndex={0}>
+        This computer
+      </Tag>
+    </WithTooltip>
+  );
+}
+
+/** Marker for a device the user marked as trusted. */
+export function TrustedTag({ device }) {
+  if (!device.isTrusted) return null;
+  return (
+    <Tag tone="success" icon={ShieldCheck}>
+      Trusted
+    </Tag>
   );
 }
 

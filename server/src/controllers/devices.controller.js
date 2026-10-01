@@ -15,3 +15,28 @@ export async function discoverDevices(req, res) {
   });
   sendSuccess(res, result);
 }
+
+/** GET /api/devices/:deviceId — one device with its network, presence, and IP history. */
+export async function getDevice(req, res) {
+  sendSuccess(res, await devicesService.getDeviceDetails(req.validated.params.deviceId));
+}
+
+/** GET /api/devices/:deviceId/events — the device's timeline, one page. */
+export async function listDeviceEvents(req, res) {
+  const { limit } = req.validated.query;
+  const { items, nextCursor } = await devicesService.listDeviceEvents(
+    req.validated.params.deviceId,
+    req.validated.query,
+  );
+  sendSuccess(res, items, { meta: { limit, nextCursor } });
+}
+
+/** GET /api/devices/:deviceId/observations — the device's discovery history, one page. */
+export async function listDeviceObservations(req, res) {
+  const { limit } = req.validated.query;
+  const { items, nextCursor } = await devicesService.listDeviceObservations(
+    req.validated.params.deviceId,
+    req.validated.query,
+  );
+  sendSuccess(res, items, { meta: { limit, nextCursor } });
+}

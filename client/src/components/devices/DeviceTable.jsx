@@ -8,6 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { useOpenDevice } from '@/hooks/useOpenDevice';
 import { cn } from '@/lib/utils';
 import {
   DeviceName,
@@ -16,6 +17,7 @@ import {
   MissingValue,
   PrivateMacTag,
 } from './DeviceAttributes';
+import { DeviceLink } from './DeviceLink';
 import { DeviceStatusBadge } from './DeviceStatusBadge';
 import { DeviceTypeLabel } from './DeviceTypeLabel';
 
@@ -56,12 +58,14 @@ function SortableHead({ column, sort, dir, onSort }) {
 }
 
 /**
- * Sortable device table (tablet and desktop). Sorting is controlled by the parent.
+ * Sortable device table (tablet and desktop). Sorting is controlled by the parent. A row opens
+ * the device's details; its IP address is the keyboard-accessible link.
  * @param {{ devices: import('@/types/api').Device[], sort: string, dir: 'asc' | 'desc',
  *           onSort: (field: string) => void, now: number, ipChanges: Record<string, string>,
  *           changedAt: Record<string, number> }} props
  */
 export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges, changedAt = {} }) {
+  const openDevice = useOpenDevice();
   return (
     <Table className="text-[13px]">
       <TableHeader className="bg-muted/20">
@@ -82,9 +86,10 @@ export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges, change
           <TableRow
             // A live change gives the row a new key: it re-mounts once and plays the highlight.
             key={`${device.id}:${changedAt[device.id] ?? 0}`}
+            onClick={(event) => openDevice(event, device.id)}
             className={cn(
               changedAt[device.id] ? 'animate-live-highlight' : 'animate-in duration-300 fade-in-0',
-              'hover:bg-primary/[0.04]',
+              'cursor-pointer hover:bg-primary/[0.04]',
               device.status === 'offline' && 'text-muted-foreground',
             )}
           >
@@ -93,7 +98,12 @@ export function DeviceTable({ devices, sort, dir, onSort, now, ipChanges, change
             </TableCell>
             <TableCell>
               <span className="inline-flex items-center gap-1 font-mono tabular-nums">
-                {device.ipAddress}
+                <DeviceLink
+                  deviceId={device.id}
+                  className="rounded-sm underline-offset-4 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  {device.ipAddress}
+                </DeviceLink>
                 <IpChangedMarker previousIp={ipChanges[device.id]} />
               </span>
             </TableCell>

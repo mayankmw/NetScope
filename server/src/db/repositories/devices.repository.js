@@ -107,3 +107,125 @@ export async function listDevicesByNetwork(db, networkId) {
   );
   return rows;
 }
+
+/**
+ * One device with `is_gateway`, or null.
+ *
+ * @param {Executor} db
+ * @param {string} deviceId
+ */
+export async function findDeviceById(db, deviceId) {
+  const { rows } = await db.query(
+    `SELECT d.*, d.mac_address = n.gateway_mac AS is_gateway
+     FROM devices d
+     JOIN networks n ON n.id = d.network_id
+     WHERE d.id = $1`,
+    [deviceId],
+  );
+  return rows[0] ?? null;
+}
+
+/** @param {Executor} db @param {string} deviceId */
+export async function deviceExists(db, deviceId) {
+  const { rows } = await db.query('SELECT EXISTS (SELECT 1 FROM devices WHERE id = $1) AS found', [
+    deviceId,
+  ]);
+  return rows[0].found;
+}
+
+/** Recent observations averaged for the response time shown on the details page. */
+const LATENCY_SAMPLE_SIZE = 20;
+
+/**
+ * Presence summary of a device:
+ * - times_seen: discovery scans that saw it;
+ * - scans_since_first_seen: completed discoveries of its network since it first appeared
+ *   (including the one that found it), so times_seen / scans_since_first_seen is its availability;
+ * - last_latency_ms: ping reply time in the latest scan that saw it (null: no ping reply);
+ * - average_latency_ms / latency_samples: over its most recent ping replies;
+ * - status_since: when its current status began (latest discovered/online/offline event).
+ *
+ * @param {Executor} db
+ * @param {string} deviceId
+ */
+export async function getDevicePresence(db, deviceId) {
+  const { rows } = await db.query(
+    `SELECT
+       (SELECT count(*)::int FROM device_observations o WHERE o.device_id = d.id) AS times_seen,
+       (SELECT count(*)::int FROM scans s
+        WHERE s.network_id = d.network_id AND s.type = 'discovery' AND s.status = 'completed'
+          AND s.finished_at >= d.first_seen_at) AS scans_since_first_seen,
+       latest.latency_ms AS last_latency_ms,
+       recent.average_ms AS average_latency_ms,
+       recent.samples AS latency_samples,
+       (SELECT e.occurred_at FROM device_events e
+        WHERE e.device_id = d.id AND e.type IN ('discovered', 'online', 'offline')
+        ORDER BY e.occurred_at DESC, e.id DESC
+        LIMIT 1) AS status_since
+     FROM devices d
+     LEFT JOIN LATERAL (
+       SELECT o.latency_ms FROM device_observations o
+       WHERE o.device_id = d.id
+       ORDER BY o.observed_at DESC, o.id DESC
+       LIMIT 1
+     ) latest ON true
+     LEFT JOIN LATERAL (
+       SELECT avg(r.latency_ms) AS average_ms, count(r.latency_ms)::int AS samples
+       FROM (
+         SELECT o.latency_ms FROM device_observations o
+         WHERE o.device_id = d.id AND o.latency_ms IS NOT NULL
+         ORDER BY o.observed_at DESC, o.id DESC
+         LIMIT $2
+       ) r
+     ) recent ON true
+     WHERE d.id = $1`,
+    [deviceId, LATENCY_SAMPLE_SIZE],
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Every IP address a device has been seen at, most recently used first.
+ *
+ * @param {Executor} db
+ * @param {string} deviceId
+ * @param {{ limit?: number }} [options]
+ */
+export async function listDeviceIpHistory(db, deviceId, { limit = 10 } = {}) {
+  const { rows } = await db.query(
+    `SELECT ip_address,
+            min(observed_at) AS first_seen_at,
+            max(observed_at) AS last_seen_at,
+            count(*)::int AS times_seen
+     FROM device_observations
+     WHERE device_id = $1
+     GROUP BY ip_address
+     ORDER BY max(observed_at) DESC
+     LIMIT $2`,
+    [deviceId, limit],
+  );
+  return rows;
+}
+
+/**
+ * One page of a device's discovery history (the scans that saw it), newest first. `before` is
+ * the id of the last observation of the previous page; the keyset is (observed_at, id).
+ *
+ * @param {Executor} db
+ * @param {{ deviceId: string, before?: string, limit: number }} options
+ */
+export async function listDeviceObservations(db, { deviceId, before = null, limit }) {
+  const { rows } = await db.query(
+    `SELECT o.id, o.scan_id, o.ip_address, o.hostname, o.latency_ms, o.observed_at,
+            s.triggered_by
+     FROM device_observations o
+     JOIN scans s ON s.id = o.scan_id
+     WHERE o.device_id = $1
+       AND ($2::bigint IS NULL
+            OR (o.observed_at, o.id) < (SELECT observed_at, id FROM device_observations WHERE id = $2))
+     ORDER BY o.observed_at DESC, o.id DESC
+     LIMIT $3`,
+    [deviceId, before, limit],
+  );
+  return rows;
+}
