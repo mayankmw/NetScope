@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   formatDuration,
   formatElapsed,
+  formatInterval,
   formatLatency,
   formatPercent,
   formatRelativeTime,
@@ -65,5 +66,15 @@ describe('formatElapsed', () => {
     expect(formatElapsed(1_234)).toBe('1.2 s');
     expect(formatElapsed(48_400)).toBe('48 s');
     expect(formatElapsed(125_000)).toBe('2m 5s');
+  });
+});
+
+describe('formatInterval', () => {
+  it('uses the largest whole unit', () => {
+    expect(formatInterval(86_400_000)).toBe('1 day');
+    expect(formatInterval(2 * 86_400_000)).toBe('2 days');
+    expect(formatInterval(36 * 3_600_000)).toBe('36 hours');
+    expect(formatInterval(90 * 60_000)).toBe('90 minutes');
+    expect(formatInterval(0)).toBe('0 seconds');
   });
 });

@@ -6,7 +6,7 @@ NetScope discovers the devices on your local network, tracks them over time, sho
 connect, and alerts you when something new appears. It is in the spirit of Fing and GlassWire, and
 is built to be safe by default.
 
-> **Status:** Step 9 of 12 — historical scans. See the [roadmap](docs/ROADMAP.md).
+> **Status:** Step 10 of 12 — network alerts. See the [roadmap](docs/ROADMAP.md).
 
 ## Scope and safety
 
@@ -28,7 +28,7 @@ Details: [Architecture §5 — Network layer and safety model](docs/ARCHITECTURE
 - Safe port scans of a single known device (fixed TCP connect profile, service detection)
 - Interactive logical network topology (gateway → devices), live
 - Scan history (what each scan found, missed, and changed) and device presence history
-- New-device and change alerts
+- Alerts for new devices, devices back after a long absence, and address changes (live, deduplicated)
 - CSV / JSON report export
 
 ## Tech stack
@@ -154,6 +154,14 @@ scan. On a device's page, **Presence history** shows when it was online and offl
 7, 30, or 90 days, and which scans found it. Details:
 [docs/SCAN_HISTORY.md](docs/SCAN_HISTORY.md).
 
+**Alerts** tell you when a device NetScope has never seen joins your network (a warning), when a
+known device comes back after a day or more away, or when one changes address. A device that was
+only briefly away, or that did not change, raises nothing, and the first scan of a network only
+records its devices. Alerts appear live as a toast in every open tab and as an unread count on the
+bell (top bar) and in the sidebar; the **Alerts** page lists them with Mark read, Resolve, and
+Reopen, and a device's page shows its own. Repeats update the open alert instead of piling up, and
+a resolved alert stays quiet for a day. Details: [docs/ALERTS.md](docs/ALERTS.md).
+
 From the command line:
 
 ```bash
@@ -166,6 +174,9 @@ curl -s http://127.0.0.1:4000/api/devices/<deviceId>/ports | python3 -m json.too
 curl -s "http://127.0.0.1:4000/api/scans?type=discovery&limit=5" | python3 -m json.tool
 curl -s http://127.0.0.1:4000/api/scans/<scanId> | python3 -m json.tool
 curl -s "http://127.0.0.1:4000/api/devices/<deviceId>/history?days=7" | python3 -m json.tool
+curl -s "http://127.0.0.1:4000/api/alerts?status=open" | python3 -m json.tool
+curl -s -X PATCH -H 'Content-Type: application/json' -d '{"status":"read"}' \
+  http://127.0.0.1:4000/api/alerts/<alertId> | python3 -m json.tool
 ```
 
 Scans only this machine's private subnet: one ping per address, an ARP cache read, and nmap host
@@ -226,7 +237,7 @@ Annotated tree: [Architecture §3](docs/ARCHITECTURE.md#3-repository-layout).
 7. ✅ Safe port scanning
 8. ✅ Network topology visualization
 9. ✅ Historical scans
-10. New-device alerts
+10. ✅ Network alerts
 11. Report export
 12. Deployment
 

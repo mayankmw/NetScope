@@ -226,6 +226,7 @@ describe('POST /api/devices/discover', () => {
       isGateway: false,
       isSelf: false,
       isNew: true,
+      classification: 'new',
       previousIpAddress: null,
       sources: ['arp', 'ping'],
       firstSeenAt: expect.any(String),

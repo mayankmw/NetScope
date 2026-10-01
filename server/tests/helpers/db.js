@@ -99,3 +99,36 @@ export async function insertDeviceEvent({
   );
   return rows[0];
 }
+
+/** Inserts an alert with sensible defaults (an unread new-device alert). */
+export async function insertAlert({
+  networkId,
+  deviceId = null,
+  type = 'new_device',
+  severity = 'warning',
+  status = 'unread',
+  message = 'New device on the network.',
+  dedupKey,
+  createdAt,
+}) {
+  const { rows } = await query(
+    `INSERT INTO alerts (network_id, device_id, type, severity, status, message, dedup_key,
+                         read_at, resolved_at, created_at, last_occurred_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7,
+             CASE WHEN $5 <> 'unread' THEN COALESCE($8, now()) END,
+             CASE WHEN $5 = 'resolved' THEN COALESCE($8, now()) END,
+             COALESCE($8, now()), COALESCE($8, now()))
+     RETURNING *`,
+    [
+      networkId,
+      deviceId,
+      type,
+      severity,
+      status,
+      message,
+      dedupKey ?? `${type}:${deviceId ?? crypto.randomUUID()}`,
+      createdAt ?? null,
+    ],
+  );
+  return rows[0];
+}

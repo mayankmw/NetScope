@@ -1,4 +1,5 @@
 import { Network } from 'lucide-react';
+import { AlertsBell } from '@/components/alerts/AlertsBell';
 import { DiscoverButton } from '@/components/devices/DiscoverButton';
 import { LiveIndicator } from '@/components/system/LiveIndicator';
 import { SystemStatusIndicator } from '@/components/system/SystemStatusIndicator';
@@ -23,8 +24,8 @@ function NetworkBadge() {
 }
 
 /**
- * Sticky top bar: mobile menu, current network, live-update and system status, and the global
- * discover action.
+ * Sticky top bar: mobile menu, current network, live-update and system status, alerts (with the
+ * unread count), and the global discover action.
  */
 export function TopBar() {
   return (
@@ -36,6 +37,7 @@ export function TopBar() {
           <NetworkBadge />
           <LiveIndicator className="hidden sm:inline-flex" />
           <SystemStatusIndicator />
+          <AlertsBell />
           <DiscoverButton className="hidden sm:inline-flex" />
           <DiscoverButton compact size="icon" className="sm:hidden" />
         </div>

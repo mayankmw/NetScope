@@ -3,13 +3,16 @@ import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import * as alertService from '@/services/alertService';
 import { ApiError } from '@/services/apiClient';
 import * as deviceService from '@/services/deviceService';
+import { resetAlertStore } from '@/stores/useAlertStore';
 import { resetDeviceDetailsStore } from '@/stores/useDeviceDetailsStore';
 import { resetDeviceStore } from '@/stores/useDeviceStore';
 import { resetPortScanStore, usePortScanStore } from '@/stores/usePortScanStore';
 import {
   DEVICE_ID,
+  makeAlert,
   makeDeviceDetails,
   makeDeviceHistory,
   makeDevice,
@@ -33,6 +36,7 @@ vi.mock('@/services/deviceService', () => ({
   startPortScan: vi.fn(),
   getDeviceHistory: vi.fn(),
 }));
+vi.mock('@/services/alertService', () => ({ listAlerts: vi.fn(), updateAlertStatus: vi.fn() }));
 
 function renderAt(url) {
   const router = createMemoryRouter(
@@ -57,6 +61,8 @@ beforeEach(() => {
   resetDeviceStore();
   resetDeviceDetailsStore();
   resetPortScanStore();
+  resetAlertStore();
+  alertService.listAlerts.mockResolvedValue({ items: [], nextCursor: null });
   deviceService.getDevice.mockResolvedValue(makeDeviceDetails());
   deviceService.getDevicePorts.mockResolvedValue(makeDevicePorts());
   deviceService.listDeviceEvents.mockResolvedValue({ items: makeTimeline(), nextCursor: null });
@@ -208,6 +214,46 @@ describe('DeviceDetailsPage', () => {
       days: 7,
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it('shows the alerts about the device, and none for a device without', async () => {
+    alertService.listAlerts.mockResolvedValue({
+      items: [
+        makeAlert(),
+        makeAlert({
+          id: 'c0ffee00-0000-4000-8000-000000000002',
+          type: 'ip_changed',
+          status: 'resolved',
+          message: 'raspberrypi.lan moved from 192.168.1.20 to 192.168.1.21.',
+          readAt: new Date().toISOString(),
+          resolvedAt: new Date().toISOString(),
+        }),
+      ],
+      nextCursor: null,
+    });
+    renderAt(`/devices/${DEVICE_ID}`);
+
+    const alerts = (await screen.findByRole('heading', { name: 'Alerts' })).closest('section');
+    expect(alertService.listAlerts).toHaveBeenCalledWith(
+      expect.objectContaining({ deviceId: DEVICE_ID, limit: 5 }),
+    );
+    expect(alerts).toHaveTextContent('1 open');
+    expect(within(alerts).getAllByRole('listitem')).toHaveLength(2);
+    expect(
+      within(alerts).getByRole('heading', { name: 'New device (unread)' }),
+    ).toBeInTheDocument();
+    // On the device's own page, no link back to it.
+    expect(within(alerts).queryByRole('link', { name: 'Open device' })).not.toBeInTheDocument();
+    expect(within(alerts).getByRole('link', { name: 'Open in Alerts' })).toHaveAttribute(
+      'href',
+      `/alerts?status=all&device=${DEVICE_ID}`,
+    );
+  });
+
+  it('has no alerts panel for a device that never raised one', async () => {
+    renderAt(`/devices/${DEVICE_ID}`);
+    await screen.findByRole('heading', { name: 'Presence history' });
+    expect(screen.queryByRole('heading', { name: 'Alerts' })).not.toBeInTheDocument();
   });
 
   it('links each scan of the discovery history to its page', async () => {

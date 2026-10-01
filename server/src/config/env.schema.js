@@ -64,6 +64,11 @@ export const envSchema = z.object({
   PORT_SCAN_TIMEOUT_MS: milliseconds(15_000, 600_000, 120_000),
   PORT_SCAN_SERVICE_DETECTION: z.enum(['light', 'off']).default('light'),
 
+  // Alerts raised by discovery. A device must have been away this long for "back online" to be
+  // an alert; after an alert is resolved, the same alert stays quiet for the cooldown.
+  ALERT_RETURN_AFTER_MS: milliseconds(60_000, 7_776_000_000, 86_400_000),
+  ALERT_COOLDOWN_MS: milliseconds(0, 2_592_000_000, 86_400_000),
+
   // Requests that start a scan (discovery, port scan), per client and endpoint.
   SCAN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(20),
   SCAN_RATE_LIMIT_WINDOW_MS: milliseconds(1_000, 86_400_000, 600_000),
@@ -151,6 +156,10 @@ export function parseEnv(env, appInfo) {
       enabled: vars.PORT_SCAN_ENABLED,
       timeoutMs: vars.PORT_SCAN_TIMEOUT_MS,
       serviceDetection: vars.PORT_SCAN_SERVICE_DETECTION,
+    },
+    alerts: {
+      returnAfterMs: vars.ALERT_RETURN_AFTER_MS,
+      cooldownMs: vars.ALERT_COOLDOWN_MS,
     },
   };
 }

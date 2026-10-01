@@ -149,3 +149,40 @@ export function toPortDto(row, scan) {
     isNew: new Date(row.first_seen_at) >= new Date(scan.started_at),
   };
 }
+
+/**
+ * @param {Record<string, any>} row an `alerts` row joined as in alertsRepository
+ */
+export function toAlertDto(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    severity: row.severity,
+    status: row.status,
+    message: row.message,
+    network: { id: row.network_id, cidr: row.network_cidr },
+    // The device as it is now; `context` keeps what it was when the alert last occurred.
+    device: row.device_id
+      ? {
+          id: row.device_id,
+          ipAddress: row.device_ip_address,
+          macAddress: row.device_mac_address,
+          macIsRandom: row.device_mac_is_random,
+          hostname: row.device_hostname,
+          displayName: row.device_display_name,
+          vendor: row.device_vendor,
+          deviceType: row.device_device_type,
+          status: row.device_status,
+          isGateway: row.device_is_gateway ?? false,
+        }
+      : null,
+    scanId: row.scan_id,
+    context: row.context,
+    occurrences: row.occurrences,
+    createdAt: row.created_at,
+    lastOccurredAt: row.last_occurred_at,
+    readAt: row.read_at,
+    resolvedAt: row.resolved_at,
+    updatedAt: row.updated_at,
+  };
+}

@@ -1,6 +1,6 @@
 # NetScope Architecture
 
-> Status: **Step 9 — historical scans.** Items marked _(Step N)_ are designed here but built in that step.
+> Status: **Step 10 — network alerts.** Items marked _(Step N)_ are designed here but built in that step.
 > Related: [API](API.md) · [Database](DATABASE.md) · [Roadmap](ROADMAP.md)
 
 ## 1. System overview
@@ -75,8 +75,8 @@ netscope/
 │   │   │   │                      DeviceStatusBadge, DeviceTypeLabel, DeviceLink, attributes,
 │   │   │   │                      skeleton
 │   │   │   ├── device-details/    DeviceHeader, DeviceStatus, DeviceIdentityCard,
-│   │   │   │                      DeviceNetworkCard, DevicePresenceHistory, DevicePorts, PortRow,
-│   │   │   │                      DeviceActivity, DeviceMetadata, skeleton
+│   │   │   │                      DeviceNetworkCard, DeviceAlerts, DevicePresenceHistory,
+│   │   │   │                      DevicePorts, PortRow, DeviceActivity, DeviceMetadata, skeleton
 │   │   │   ├── network/           NetworkPanel
 │   │   │   ├── system/            SystemStatusCard, SystemStatusIndicator
 │   │   │   ├── topology/          TopologyGraph, Toolbar, NodePanel, Legend, List, Controls;
@@ -84,28 +84,30 @@ netscope/
 │   │   │   ├── scans/             ScanHistoryList, ScanTrendChart, ScanStatusBadge, ScanLink,
 │   │   │   │                      ScanDetailsHeader, ScanDiscoveryResults, ScanPortResults,
 │   │   │   │                      ScanSettings
-│   │   │   └── alerts/            (10) Alert list
+│   │   │   └── alerts/            AlertItem, AlertRules, AlertsBell, alertTypes
 │   │   ├── config/                env.js — the only reader of import.meta.env
 │   │   ├── constants/             deviceTypes.js (labels for device_types codes)
 │   │   ├── hooks/                 useDeviceInventory, useDeviceFilters (URL), useDiscoverNetwork,
 │   │   │                          useDeviceDetails, useDevicePorts, useOpenDevice, useRealtime,
 │   │   │                          useTopology, useCytoscape, useTopologyGraph, useScanHistory,
-│   │   │                          useScanDetails, useOpenScan, useSystemHealth, useMediaQuery,
-│   │   │                          useNow, useKeyboardShortcut
+│   │   │                          useScanDetails, useOpenScan, useAlerts, useDeviceAlerts,
+│   │   │                          useSystemHealth, useMediaQuery, useNow, useKeyboardShortcut
 │   │   ├── layouts/               AppLayout (sidebar + top bar + animated outlet)
 │   │   ├── lib/                   shadcn `cn` helper
 │   │   ├── pages/                 DashboardPage, DevicesPage, DeviceDetailsPage, TopologyPage,
-│   │   │                          ScansPage, ScanDetailsPage, NotFoundPage, RouteErrorPage
-│   │   ├── services/              apiClient, deviceService, scanService, healthService,
-│   │   │                          realtimeClient
+│   │   │                          ScansPage, ScanDetailsPage, AlertsPage, NotFoundPage,
+│   │   │                          RouteErrorPage
+│   │   ├── services/              apiClient, deviceService, scanService, alertService,
+│   │   │                          healthService, realtimeClient
 │   │   ├── stores/                useDeviceStore, useDeviceDetailsStore, usePortScanStore,
-│   │   │                          useScanHistoryStore, useScanDetailsStore, useConnectionStore,
-│   │   │                          useSystemStore, useUiStore (Zustand)
+│   │   │                          useScanHistoryStore, useScanDetailsStore, useAlertStore,
+│   │   │                          useConnectionStore, useSystemStore, useUiStore (Zustand)
 │   │   ├── test/                  Vitest setup (jsdom polyfills) and fixtures
 │   │   ├── types/                 JSDoc typedefs for API contracts
 │   │   ├── utils/                 deviceFilters (search/filter/sort/URL), deviceActivity (timeline
 │   │   │                          text), deviceLinks, format, ids, ip, mac, portScan, topology,
-│   │   │                          scans (filters/URL, page merge), presence (bar segments, stats)
+│   │   │                          scans (filters/URL, page merge), presence (bar segments, stats),
+│   │   │                          alerts (filters/URL, states), alertAnnouncer (toast batching)
 │   │   ├── index.css              Tailwind entry + NetScope theme tokens and utilities
 │   │   └── main.jsx
 │   ├── .env.example
@@ -359,9 +361,11 @@ come with a job runner, if scheduled scans are added.
 dedupe) and knows nothing about React. `hooks/useRealtime.js`, mounted once in `AppLayout`,
 routes its status to `useConnectionStore` (top-bar "Live" indicator) and its events to the
 stores' `applyEvent` (`useDeviceStore`, `useDeviceDetailsStore`, `usePortScanStore`,
-`useScanHistoryStore`, `useScanDetailsStore`). Rows changed
+`useScanHistoryStore`, `useScanDetailsStore`, `useAlertStore`). Rows changed
 by an event get a brief highlight. Port scans (`portscan.*`) run in the background, so the tab that
-started one announces its outcome with a toast.
+started one announces its outcome with a toast. New alerts (`alert.created`) are toasted in every
+tab; a burst within 600 ms becomes one toast. On start (and after a reconnection) it loads the
+alert counts behind the navigation badge.
 
 ## 7. Frontend architecture
 
@@ -385,18 +389,19 @@ Imports use the `@/` alias (`@/services/apiClient`).
 
 ### 7.2 State strategy
 
-| Kind of state                        | Where it lives                                                                           |
-| ------------------------------------ | ---------------------------------------------------------------------------------------- |
-| Ephemeral UI (menu open, input text) | Component `useState`                                                                     |
-| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`              |
-| The device on the details page       | `useDeviceDetailsStore`: details, timeline and discovery history pages, presence history |
-| Scan history list                    | `useScanHistoryStore`: one filtered list (filters in the URL), cursor pages              |
-| The scan on the scan details page    | `useScanDetailsStore`: one scan and its results                                          |
-| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)                         |
-| Port scans                           | `usePortScanStore`: the scan running anywhere, and each viewed device's ports            |
-| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard                    |
-| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)                   |
-| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable             |
+| Kind of state                        | Where it lives                                                                                             |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| Ephemeral UI (menu open, input text) | Component `useState`                                                                                       |
+| Device inventory + discovery status  | `useDeviceStore`: normalized `byId` + ordered `ids`, `network`, `discovery`                                |
+| The device on the details page       | `useDeviceDetailsStore`: details, timeline and discovery history pages, presence history                   |
+| Scan history list                    | `useScanHistoryStore`: one filtered list (filters in the URL), cursor pages                                |
+| The scan on the scan details page    | `useScanDetailsStore`: one scan and its results                                                            |
+| Alerts                               | `useAlertStore`: counts (badge), the Alerts page list, the shown device's alerts; optimistic state changes |
+| Real-time connection status          | `useConnectionStore` (top-bar "Live" indicator, store decisions)                                           |
+| Port scans                           | `usePortScanStore`: the scan running anywhere, and each viewed device's ports                              |
+| API / database health                | `useSystemStore`: one request shared by the top bar and the dashboard                                      |
+| UI preferences (sidebar collapsed)   | `useUiStore` with `persist` → localStorage (fails silently if blocked)                                     |
+| Device filters, search, sort         | URL search params (`useDeviceFilters`), so views are linkable and reloadable                               |
 
 Data flow: **component → hook → store action → service → apiClient**. Components never call
 services or `fetch`. Stores expose actions (`fetchDevices`, `discoverNetwork`, `checkHealth`);
@@ -427,8 +432,11 @@ selectors to limit re-renders.
   running scan turns completed in place). The presence history lives in `useDeviceDetailsStore`
   and refreshes with the device; changing its range reloads only it.
 
-Planned stores: `useAlertStore` (Step 10). TanStack Query
-is deliberately not used: most data will arrive by server push into shared entity state, and
+- `useAlertStore` takes exact counts from every alert event; `alert.created` adds the alert to
+  each loaded list it matches, without a request. Changing an alert's state shows at once and is
+  undone if the server refuses it.
+
+TanStack Query is deliberately not used: most data will arrive by server push into shared entity state, and
 Zustand covers both push and fetch with one model.
 
 ### 7.3 Other decisions
@@ -462,23 +470,27 @@ Zustand covers both push and fetch with one model.
   discovery stores its outcome counts on its scan row, so lists never aggregate. Charts are plain
   elements (no chart library): a column per scan, and a presence bar built from status periods.
   Details: [SCAN_HISTORY.md](SCAN_HISTORY.md).
+- **Alerts** _(Step 10)_ — decided on the server by pure rules over each discovery's before/after
+  values, recorded in the discovery transaction, deduplicated by the database (one open alert per
+  key). The client shows them: unread badge (sidebar and top-bar bell), grouped toasts, the
+  Alerts page, and a panel on the device page. Details: [ALERTS.md](ALERTS.md).
 
 ## 8. UI structure
 
 ### 8.1 Routes
 
-| Path                 | Page                | Step  | Purpose                                                                                    |
-| -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------ |
-| `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                   |
-| `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`) |
-| `/devices/:deviceId` | `DeviceDetailsPage` | 6–9   | Status, identity, network, presence history, open ports (scan), activity, metadata         |
-| `/topology`          | `TopologyPage`      | 8     | Logical network graph: gateway → devices; search, layouts, list view, live                 |
-| `/scans`             | `ScansPage`         | 9     | Scan history: network / port scans, status filter, trend chart (`?type=&status=&device=`)  |
-| `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found, missed, and changed; ports; settings; older / newer                     |
-| `/alerts`            | `AlertsPage`        | 10    | Alert inbox with acknowledge                                                               |
-| `/reports`           | `ReportsPage`       | 11    | Export inventory and scan results                                                          |
-| `/settings`          | `SettingsPage`      | later | Scan schedule, retention, preferences                                                      |
-| `*`                  | `NotFoundPage`      | 1     |                                                                                            |
+| Path                 | Page                | Step  | Purpose                                                                                     |
+| -------------------- | ------------------- | ----- | ------------------------------------------------------------------------------------------- |
+| `/`                  | `DashboardPage`     | 4     | Network overview: stats, network, health, newest devices                                    |
+| `/devices`           | `DevicesPage`       | 4     | Searchable, filterable, sortable device inventory (`?q=&status=&type=&vendor=&sort=&dir=`)  |
+| `/devices/:deviceId` | `DeviceDetailsPage` | 6–9   | Status, identity, network, presence history, open ports (scan), activity, metadata          |
+| `/topology`          | `TopologyPage`      | 8     | Logical network graph: gateway → devices; search, layouts, list view, live                  |
+| `/scans`             | `ScansPage`         | 9     | Scan history: network / port scans, status filter, trend chart (`?type=&status=&device=`)   |
+| `/scans/:scanId`     | `ScanDetailsPage`   | 9     | What a scan found, missed, and changed; ports; settings; older / newer                      |
+| `/alerts`            | `AlertsPage`        | 10    | Alerts by state and type (`?status=&type=&device=`): read, resolve, reopen; how alerts work |
+| `/reports`           | `ReportsPage`       | 11    | Export inventory and scan results                                                           |
+| `/settings`          | `SettingsPage`      | later | Scan schedule, retention, preferences                                                       |
+| `*`                  | `NotFoundPage`      | 1     |                                                                                             |
 
 ### 8.2 Layout and dashboard (target)
 
@@ -509,7 +521,7 @@ Each widget appears in the step that produces its data:
 | Network health                         | Gateway reachability, latency, and packet loss (formula defined in-step) | 5     |
 | Topology preview                       | Device inventory (`buildTopologyModel`)                                  | later |
 | Last scan summary                      | `GET /api/scans?limit=1`                                                 | later |
-| Recent alerts                          | `GET /api/alerts`, `alert.created` events                                | 10    |
+| Recent alerts                          | `GET /api/alerts`, `alert.created` events                                | later |
 
 Every data view implements **loading, empty, error, and populated** states, and works at mobile
 widths (the sidebar collapses to a sheet).
@@ -521,38 +533,39 @@ defaults for later steps are proposals, finalized in their step.
 
 ### Server
 
-| Variable                         | Step | Default                 | Secret | Purpose                                                                 |
-| -------------------------------- | ---- | ----------------------- | ------ | ----------------------------------------------------------------------- |
-| `NODE_ENV`                       | 1    | `development`           |        | `development` \| `test` \| `production`                                 |
-| `HOST`                           | 1    | `127.0.0.1`             |        | Bind address. Loopback until auth exists.                               |
-| `PORT`                           | 1    | `4000`                  |        | HTTP + WebSocket port                                                   |
-| `LOG_LEVEL`                      | 1    | `info`                  |        | pino level                                                              |
-| `CORS_ORIGIN`                    | 1    | `http://localhost:5173` |        | Comma-separated browser origin allowlist                                |
-| `DATABASE_URL`                   | 2    | — (required)            | ✅     | `postgres://user:pass@host:5432/netscope` (TLS: `?sslmode=verify-full`) |
-| `DATABASE_POOL_MAX`              | 2    | `10`                    |        | Max pooled connections                                                  |
-| `DATABASE_CONNECTION_TIMEOUT_MS` | 2    | `5000`                  |        | Wait for a pooled connection before failing                             |
-| `DATABASE_STATEMENT_TIMEOUT_MS`  | 2    | `15000`                 |        | Server-side limit per SQL statement                                     |
-| `TEST_DATABASE_URL`              | 2    | — (tests only)          | ✅     | Database for `npm test`; name must end in `_test`                       |
-| `SCAN_INTERFACE`                 | 3    | auto-detect             |        | Interface to monitor (`en0`, `eth0`)                                    |
-| `SCAN_TIMEOUT_MS`                | 3    | `60000`                 |        | Hard limit per discovery run                                            |
-| `PING_TIMEOUT_MS`                | 3    | `1000`                  |        | Per-host ping timeout                                                   |
-| `PING_CONCURRENCY`               | 3    | `64`                    |        | Parallel pings during a sweep                                           |
-| `NMAP_DISCOVERY`                 | 3    | `auto`                  |        | `auto`: use nmap host discovery when installed; `off`: never            |
-| `NMAP_PATH`                      | 3    | standard locations      |        | Absolute nmap path if installed elsewhere (must end in `/nmap`)         |
-| `WS_PATH`                        | 5    | `/ws`                   |        | WebSocket endpoint                                                      |
-| `WS_HEARTBEAT_INTERVAL_MS`       | 5    | `30000`                 |        | Ping + `system.heartbeat` interval; unresponsive clients are dropped    |
-| `PORT_SCAN_ENABLED`              | 7    | `true`                  |        | `false` refuses every port scan (403); results stay readable            |
-| `PORT_SCAN_TIMEOUT_MS`           | 7    | `120000`                |        | Hard limit per port scan (15000–600000)                                 |
-| `PORT_SCAN_SERVICE_DETECTION`    | 7    | `light`                 |        | `light`: `-sV --version-light`; `off`: TCP connects only                |
-| `SCAN_RATE_LIMIT_MAX`            | 7    | `20`                    |        | Scans a client may start per window (discovery, port scans separately)  |
-| `SCAN_RATE_LIMIT_WINDOW_MS`      | 7    | `600000`                |        | Rate-limit window (10 min)                                              |
-| `SCAN_SCHEDULE_MINUTES`          | 9    | `0` (off)               |        | Periodic discovery interval                                             |
-| `DATA_RETENTION_DAYS`            | 9    | `90`                    |        | Purge observations older than this                                      |
-| `ALERT_OFFLINE_AFTER_MINUTES`    | 10   | `15`                    |        | Absence before a device-offline alert                                   |
-| `SESSION_SECRET`                 | 12   | — (required in prod)    | ✅     | Signs session cookies                                                   |
-| `ADMIN_PASSWORD_HASH`            | 12   | — (required in prod)    | ✅     | Login credential (argon2/bcrypt hash, never plaintext)                  |
-| `TRUST_PROXY`                    | 12   | `false`                 |        | Set when behind a reverse proxy                                         |
-| `SERVE_CLIENT`                   | 12   | `false`                 |        | Serve `client/dist` from Express (single origin)                        |
+| Variable                         | Step  | Default                 | Secret | Purpose                                                                 |
+| -------------------------------- | ----- | ----------------------- | ------ | ----------------------------------------------------------------------- |
+| `NODE_ENV`                       | 1     | `development`           |        | `development` \| `test` \| `production`                                 |
+| `HOST`                           | 1     | `127.0.0.1`             |        | Bind address. Loopback until auth exists.                               |
+| `PORT`                           | 1     | `4000`                  |        | HTTP + WebSocket port                                                   |
+| `LOG_LEVEL`                      | 1     | `info`                  |        | pino level                                                              |
+| `CORS_ORIGIN`                    | 1     | `http://localhost:5173` |        | Comma-separated browser origin allowlist                                |
+| `DATABASE_URL`                   | 2     | — (required)            | ✅     | `postgres://user:pass@host:5432/netscope` (TLS: `?sslmode=verify-full`) |
+| `DATABASE_POOL_MAX`              | 2     | `10`                    |        | Max pooled connections                                                  |
+| `DATABASE_CONNECTION_TIMEOUT_MS` | 2     | `5000`                  |        | Wait for a pooled connection before failing                             |
+| `DATABASE_STATEMENT_TIMEOUT_MS`  | 2     | `15000`                 |        | Server-side limit per SQL statement                                     |
+| `TEST_DATABASE_URL`              | 2     | — (tests only)          | ✅     | Database for `npm test`; name must end in `_test`                       |
+| `SCAN_INTERFACE`                 | 3     | auto-detect             |        | Interface to monitor (`en0`, `eth0`)                                    |
+| `SCAN_TIMEOUT_MS`                | 3     | `60000`                 |        | Hard limit per discovery run                                            |
+| `PING_TIMEOUT_MS`                | 3     | `1000`                  |        | Per-host ping timeout                                                   |
+| `PING_CONCURRENCY`               | 3     | `64`                    |        | Parallel pings during a sweep                                           |
+| `NMAP_DISCOVERY`                 | 3     | `auto`                  |        | `auto`: use nmap host discovery when installed; `off`: never            |
+| `NMAP_PATH`                      | 3     | standard locations      |        | Absolute nmap path if installed elsewhere (must end in `/nmap`)         |
+| `WS_PATH`                        | 5     | `/ws`                   |        | WebSocket endpoint                                                      |
+| `WS_HEARTBEAT_INTERVAL_MS`       | 5     | `30000`                 |        | Ping + `system.heartbeat` interval; unresponsive clients are dropped    |
+| `PORT_SCAN_ENABLED`              | 7     | `true`                  |        | `false` refuses every port scan (403); results stay readable            |
+| `PORT_SCAN_TIMEOUT_MS`           | 7     | `120000`                |        | Hard limit per port scan (15000–600000)                                 |
+| `PORT_SCAN_SERVICE_DETECTION`    | 7     | `light`                 |        | `light`: `-sV --version-light`; `off`: TCP connects only                |
+| `SCAN_RATE_LIMIT_MAX`            | 7     | `20`                    |        | Scans a client may start per window (discovery, port scans separately)  |
+| `SCAN_RATE_LIMIT_WINDOW_MS`      | 7     | `600000`                |        | Rate-limit window (10 min)                                              |
+| `ALERT_RETURN_AFTER_MS`          | 10    | `86400000`              |        | Minimum absence for a "back online" alert (1 min – 90 days)             |
+| `ALERT_COOLDOWN_MS`              | 10    | `86400000`              |        | After an alert is resolved, the same alert stays quiet (0 – 30 days)    |
+| `SCAN_SCHEDULE_MINUTES`          | later | `0` (off)               |        | Periodic discovery interval                                             |
+| `DATA_RETENTION_DAYS`            | later | `90`                    |        | Purge observations older than this                                      |
+| `SESSION_SECRET`                 | 12    | — (required in prod)    | ✅     | Signs session cookies                                                   |
+| `ADMIN_PASSWORD_HASH`            | 12    | — (required in prod)    | ✅     | Login credential (argon2/bcrypt hash, never plaintext)                  |
+| `TRUST_PROXY`                    | 12    | `false`                 |        | Set when behind a reverse proxy                                         |
+| `SERVE_CLIENT`                   | 12    | `false`                 |        | Serve `client/dist` from Express (single origin)                        |
 
 ### Client
 
@@ -650,3 +663,7 @@ defaults for later steps are proposals, finalized in their step.
 | 24  | Discovery outcome stored on the scan row       | Lists read one snapshot per scan instead of aggregating observations, and keep what the scan reported even if devices change later. Back-filled for older scans.              | Counts need to be recomputed after device merges.                        |
 | 25  | Presence periods from status events            | `device_events` already holds every status change with its scan; periods are a pure function of it. Re-deriving status from observations would duplicate the offline rules.   | —                                                                        |
 | 26  | Scan history pages use a keyset cursor         | Same reason as #17: the history grows while being read. `(created_at, id)` with a matching index per filter keeps every page a range scan.                                    | —                                                                        |
+| 27  | Alerts written in the discovery transaction    | A new device is "new" only once: if its alert were written separately and failed, it could never be raised again. Committing both together makes that impossible.             | —                                                                        |
+| 28  | Deduplication by an open-alert unique index    | One statement decides created / merged / suppressed, and the index makes "one open alert per device and change" a database rule rather than a check in code.                  | —                                                                        |
+| 29  | First scan of a network is a baseline          | Every device would be "new" on the first scan; alerting on all of them is noise. Alerts start once there is something to compare with.                                        | Users want an inventory review step.                                     |
+| 30  | "Back online" only after a long absence        | Phones and laptops come and go all day; that is their timeline, not an alert. A device away for a day or more coming back is worth a notice.                                  | —                                                                        |

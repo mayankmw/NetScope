@@ -453,3 +453,41 @@ export function makeDeviceHistory(overrides = {}) {
     ...overrides,
   };
 }
+
+export const ALERT_ID = 'c0ffee00-0000-4000-8000-000000000001';
+
+/** Shaped like an entry of GET /api/alerts. Default: an unread new-device alert for the Pi. */
+export function makeAlert(overrides = {}) {
+  const at = new Date(Date.now() - 5 * 60_000).toISOString();
+  return {
+    id: ALERT_ID,
+    type: 'new_device',
+    severity: 'warning',
+    status: 'unread',
+    message: 'New device on the network: raspberrypi.lan at 192.168.1.21 (MAC b8:27:eb:12:34:56).',
+    network: { id: NETWORK.id, cidr: NETWORK.cidr },
+    device: {
+      id: DEVICE_ID,
+      ipAddress: '192.168.1.21',
+      macAddress: 'b8:27:eb:12:34:56',
+      macIsRandom: false,
+      hostname: 'raspberrypi.lan',
+      displayName: null,
+      vendor: 'Raspberry Pi Foundation',
+      deviceType: 'computer',
+      status: 'online',
+      isGateway: false,
+    },
+    scanId: SCAN_ID,
+    context: { ipAddress: '192.168.1.21', macAddress: 'b8:27:eb:12:34:56' },
+    occurrences: 1,
+    createdAt: at,
+    lastOccurredAt: at,
+    readAt: null,
+    resolvedAt: null,
+    updatedAt: at,
+    ...overrides,
+  };
+}
+
+export const ALERT_POLICY = { returnAfterMs: 86_400_000, cooldownMs: 86_400_000 };

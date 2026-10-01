@@ -2,6 +2,7 @@ import { NavLink } from 'react-router';
 import { PRIMARY_NAV, UPCOMING_NAV } from '@/app/navigation';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useAlertStore } from '@/stores/useAlertStore';
 import { useDeviceStore } from '@/stores/useDeviceStore';
 
 function CollapsedTooltip({ collapsed, label, children }) {
@@ -29,46 +30,68 @@ function SectionLabel({ collapsed, children }) {
  */
 export function SidebarNav({ collapsed = false, onNavigate }) {
   const deviceCount = useDeviceStore((state) => state.ids.length);
+  const unreadAlerts = useAlertStore((state) => state.counts.unread);
 
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5 px-2">
       <SectionLabel collapsed={collapsed}>Monitor</SectionLabel>
-      {PRIMARY_NAV.map(({ to, label, icon: Icon, end, showDeviceCount }) => (
-        <CollapsedTooltip key={to} collapsed={collapsed} label={label}>
-          <NavLink
-            to={to}
-            end={end}
-            onClick={onNavigate}
-            className={({ isActive }) =>
-              cn(
-                'group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
-                collapsed && 'justify-center px-0',
-                isActive
-                  ? 'bg-sidebar-accent text-primary'
-                  : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
-              )
-            }
+      {PRIMARY_NAV.map(({ to, label, icon: Icon, end, showDeviceCount, showAlertCount }) => {
+        const unread = showAlertCount ? unreadAlerts : 0;
+        return (
+          <CollapsedTooltip
+            key={to}
+            collapsed={collapsed}
+            label={unread > 0 ? `${label} (${unread} unread)` : label}
           >
-            {({ isActive }) => (
-              <>
-                {isActive && (
-                  <span
-                    className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]"
-                    aria-hidden="true"
-                  />
-                )}
-                <Icon className="size-4.5 shrink-0" aria-hidden="true" />
-                {!collapsed && <span className="truncate">{label}</span>}
-                {!collapsed && showDeviceCount && deviceCount > 0 && (
-                  <span className="ml-auto rounded-md bg-muted/60 px-1.5 text-xs text-muted-foreground tabular-nums">
-                    {deviceCount}
+            <NavLink
+              to={to}
+              end={end}
+              onClick={onNavigate}
+              className={({ isActive }) =>
+                cn(
+                  'group relative flex h-9 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring',
+                  collapsed && 'justify-center px-0',
+                  isActive
+                    ? 'bg-sidebar-accent text-primary'
+                    : 'text-sidebar-foreground/80 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground',
+                )
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  {isActive && (
+                    <span
+                      className="absolute top-1.5 bottom-1.5 left-0 w-0.5 rounded-full bg-primary shadow-[0_0_10px_var(--primary)]"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="relative shrink-0">
+                    <Icon className="size-4.5" aria-hidden="true" />
+                    {collapsed && unread > 0 && (
+                      <span
+                        className="absolute -top-1 -right-1 size-2 rounded-full bg-neon-magenta shadow-[0_0_8px_var(--neon-magenta)]"
+                        aria-hidden="true"
+                      />
+                    )}
                   </span>
-                )}
-              </>
-            )}
-          </NavLink>
-        </CollapsedTooltip>
-      ))}
+                  {!collapsed && <span className="truncate">{label}</span>}
+                  {!collapsed && showDeviceCount && deviceCount > 0 && (
+                    <span className="ml-auto rounded-md bg-muted/60 px-1.5 text-xs text-muted-foreground tabular-nums">
+                      {deviceCount}
+                    </span>
+                  )}
+                  {!collapsed && unread > 0 && (
+                    <span className="ml-auto rounded-md bg-neon-magenta/15 px-1.5 text-xs font-medium text-neon-magenta tabular-nums">
+                      {unread > 99 ? '99+' : unread}
+                    </span>
+                  )}
+                  {unread > 0 && <span className="sr-only">, {unread} unread</span>}
+                </>
+              )}
+            </NavLink>
+          </CollapsedTooltip>
+        );
+      })}
 
       <SectionLabel collapsed={collapsed}>Coming soon</SectionLabel>
       {UPCOMING_NAV.map(({ label, icon: Icon }) => (

@@ -62,12 +62,26 @@ describe('parseEnv', () => {
     expect(config.portScan).toMatchObject({ enabled: false, serviceDetection: 'off' });
   });
 
+  it('keeps alerts quiet by default: a day away for "back online", a day of cooldown', () => {
+    expect(parseEnv({ DATABASE_URL }, appInfo).alerts).toEqual({
+      returnAfterMs: 86_400_000,
+      cooldownMs: 86_400_000,
+    });
+    const tuned = parseEnv(
+      { DATABASE_URL, ALERT_RETURN_AFTER_MS: '3600000', ALERT_COOLDOWN_MS: '0' },
+      appInfo,
+    );
+    expect(tuned.alerts).toEqual({ returnAfterMs: 3_600_000, cooldownMs: 0 });
+  });
+
   it('requires DATABASE_URL', () => {
     expect(() => parseEnv({}, appInfo)).toThrow('DATABASE_URL: is required');
   });
 
   it.each([
     [{ PORT: 'abc' }, 'PORT'],
+    [{ ALERT_RETURN_AFTER_MS: '1000' }, 'ALERT_RETURN_AFTER_MS'],
+    [{ ALERT_COOLDOWN_MS: '-1' }, 'ALERT_COOLDOWN_MS'],
     [{ PORT: '70000' }, 'PORT'],
     [{ NODE_ENV: 'staging' }, 'NODE_ENV'],
     [{ LOG_LEVEL: 'verbose' }, 'LOG_LEVEL'],

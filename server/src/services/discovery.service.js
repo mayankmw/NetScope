@@ -10,6 +10,8 @@ import { ErrorCodes } from '../errors/errorCodes.js';
 import { eventBus } from '../events/eventBus.js';
 import * as network from '../network/index.js';
 import { logger } from '../utils/logger.js';
+import { classifyDevice, deriveAlerts } from './alertRules.js';
+import * as alertsService from './alerts.service.js';
 import { deriveDeviceEvents, toDeviceEventRecords } from './deviceEvents.js';
 import { toDeviceDto } from './dto.js';
 import { networkErrorToAppError } from './networkErrors.js';
@@ -63,6 +65,8 @@ function toDeviceResponse(row, device) {
     isGateway: device.isGateway,
     isSelf: device.isSelf,
     isNew: row.is_new,
+    // new | returned | ip_changed | known, compared with what was known before this scan.
+    classification: classifyDevice(row),
     previousIpAddress:
       row.is_new || row.previous_ip_address === row.ip_address ? null : row.previous_ip_address,
     sources: device.sources,
@@ -73,13 +77,13 @@ function toDeviceResponse(row, device) {
  * Discovers the devices currently visible on the local network and records them.
  *
  * Flow: detect network → record scan → ping sweep → nmap (optional) → ARP cache → merge by MAC
- *       → vendor + hostname + type → persist with device timelines (one transaction) → events
- *       → response.
+ *       → vendor + hostname + type → persist with device timelines and alerts (one transaction)
+ *       → events → response.
  *
  * Events (published on the event bus, broadcast to WebSocket clients):
- *   discovery.started once the scan is recorded; device.* and discovery.completed only after the
- *   transaction commits (clients never see uncommitted state); discovery.failed on any failure
- *   after discovery.started.
+ *   discovery.started once the scan is recorded; device.*, alert.*, and discovery.completed only
+ *   after the transaction commits (clients never see uncommitted state); discovery.failed on any
+ *   failure after discovery.started.
  *
  * Takes no caller-supplied targets: the range is always the local subnet, from the OS.
  *
@@ -237,7 +241,8 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     );
 
     // 5. Persist everything atomically: devices, observations, offline marks, each device's
-    //    timeline (device_events), and scan completion with its outcome (the scan history).
+    //    timeline (device_events), alerts, and scan completion with its outcome (the scan
+    //    history). A new device and its alert are committed together.
     signal.throwIfAborted();
     const persisted = await withTransaction(async (client) => {
       const saved = [];
@@ -285,11 +290,24 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
         ipChanges: saved.filter((device) => device.previousIpAddress).length,
         unresolvedHosts: merged.unresolvedHosts.length,
       };
+      const alerts = await alertsService.recordAlerts(
+        client,
+        deriveAlerts({
+          networkId: networkRow.id,
+          scanId: scan.id,
+          upserted,
+          gatewayMac: detected.gatewayMac,
+          selfMac: detected.localMac,
+          // The network knew no device before: this scan records its starting inventory.
+          isBaseline: known - summary.newDevices === 0,
+          returnAfterMs: config.alerts.returnAfterMs,
+        }),
+      );
       const completed = await scansRepository.completeScan(client, scan.id, { summary });
-      return { saved, deviceEvents, summary, completed };
+      return { saved, deviceEvents, summary, alerts, completed };
     });
 
-    const { saved, deviceEvents, summary, completed } = persisted;
+    const { saved, deviceEvents, summary, alerts, completed } = persisted;
     for (const device of saved) {
       if (device.isNew) {
         log.info(
@@ -305,10 +323,20 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
     }
 
     const durationMs = Math.round(performance.now() - startedAt);
-    log.info({ durationMs, ...summary }, 'Discovery: completed');
+    log.info(
+      {
+        durationMs,
+        ...summary,
+        alertsCreated: alerts.created.length,
+        alertsUpdated: alerts.updated.length,
+        alertsSuppressed: alerts.suppressed,
+      },
+      'Discovery: completed',
+    );
 
     // Committed: tell connected clients what changed, then that the run is over.
     for (const { type, data } of deviceEvents) eventBus.publish(type, data);
+    alertsService.publishRecordedAlerts(alerts);
     eventBus.publish(EventTypes.DISCOVERY_COMPLETED, {
       scanId: scan.id,
       networkId: networkRow.id,
@@ -340,6 +368,8 @@ export async function discoverDevices({ triggeredBy = 'manual', requestId } = {}
       },
       summary,
       sources: { ping: ping.report, nmap: nmap.report, arp, dns },
+      // Alerts this scan raised (created) or repeated into an open alert (updated).
+      alerts: { created: alerts.created, updated: alerts.updated },
       devices: saved,
       unresolvedHosts: merged.unresolvedHosts,
     };

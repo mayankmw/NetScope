@@ -1,7 +1,8 @@
 # NetScope Database
 
-> Status: **Step 9.** Initial schema (Step 2), the device timeline (`device_events`, Step 6), port
-> scan details (Step 7), and the scan history (discovery summaries and history indexes, Step 9).
+> Status: **Step 10.** Initial schema (Step 2), the device timeline (`device_events`, Step 6), port
+> scan details (Step 7), the scan history (discovery summaries and history indexes, Step 9), and
+> alerts (states, deduplication, Step 10).
 > Source of truth: [`server/src/db/migrations/`](../server/src/db/migrations/).
 
 ## 1. Role
@@ -62,37 +63,40 @@ There is no single generic `scan_results` table. A discovery result ("device X w
 latency Z") and a port result ("port P on device X was open") have different shapes. One table
 would need nullable columns or untyped JSON, so each scan type writes to its own typed result table.
 
-| Table                 | Purpose                                                          | Key constraints                                                                                                                         |
-| --------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `networks`            | A monitored LAN (the same laptop can join several)               | Unique `(gateway_mac, cidr)`; gateway inside `cidr`; IPv4 only                                                                          |
-| `device_types`        | Device categories (`router`, `phone`, `printer`, …)              | Code format check; 16 seeded rows                                                                                                       |
-| `devices`             | Current state of each device                                     | Unique `(network_id, mac_address)`; host IPv4 only; type FK                                                                             |
-| `scans`               | One row per scan run (`discovery` or `port`), with its outcome   | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device; a discovery `summary` has its counts |
-| `device_observations` | Discovery results: device seen by a scan, with its IP then       | Unique `(scan_id, device_id)`                                                                                                           |
-| `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)   | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history                                             |
-| `device_ports`        | TCP ports ever found open on a device, latest service/version    | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                                                            |
-| `port_scan_results`   | Port results: state (and service/version) of a port in one scan  | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                                                                    |
-| `alerts`              | Notable changes (new device, offline, IP changed, new open port) | Type/severity checks; SET NULL on device/scan delete to keep history                                                                    |
+| Table                 | Purpose                                                         | Key constraints                                                                                                                         |
+| --------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `networks`            | A monitored LAN (the same laptop can join several)              | Unique `(gateway_mac, cidr)`; gateway inside `cidr`; IPv4 only                                                                          |
+| `device_types`        | Device categories (`router`, `phone`, `printer`, …)             | Code format check; 16 seeded rows                                                                                                       |
+| `devices`             | Current state of each device                                    | Unique `(network_id, mac_address)`; host IPv4 only; type FK                                                                             |
+| `scans`               | One row per scan run (`discovery` or `port`), with its outcome  | **One active scan** (partial unique index); status/timestamp invariants; port scans need a device; a discovery `summary` has its counts |
+| `device_observations` | Discovery results: device seen by a scan, with its IP then      | Unique `(scan_id, device_id)`                                                                                                           |
+| `device_events`       | Device timeline: discovered, online, offline, updated (Step 6)  | Type check; `changes` only on `updated`; host IPv4; SET NULL on scan delete to keep history                                             |
+| `device_ports`        | TCP ports ever found open on a device, latest service/version   | Unique `(device_id, protocol, port)`; port 1–65535; TCP only                                                                            |
+| `port_scan_results`   | Port results: state (and service/version) of a port in one scan | Unique `(scan_id, device_port_id)`; state `open`/`closed`/`filtered`                                                                    |
+| `alerts`              | Alerts from discovery (new device, back online, IP changed)     | Type/severity/state checks; one open alert per `dedup_key`; read/resolved times match the state; SET NULL on device/scan delete         |
 
 ### Indexes
 
-| Index                                                                | Serves                                               |
-| -------------------------------------------------------------------- | ---------------------------------------------------- |
-| `devices_network_mac_key` (unique)                                   | Discovery matching by MAC; per-network device lists  |
-| `devices_network_status_idx`                                         | Online/offline counts and filters                    |
-| `devices_network_first_seen_idx`                                     | "New devices in the last 24 h"                       |
-| `devices_network_ip_idx`                                             | Looking up a device by current IP                    |
-| `scans_single_active_idx` (partial unique)                           | Enforces one queued/running scan                     |
-| `scans_created_idx`, `scans_type_created_idx` _(Step 9)_             | Scan history, all or by type (keyset pages)          |
-| `scans_network_type_created_idx` _(Step 9)_                          | Scan history of a network; older/newer scan          |
-| `scans_network_discoveries_idx` (partial) _(Step 9)_                 | Completed discoveries by time: last scan, presence   |
-| `scans_target_device_created_idx` (partial)                          | Port scans of a device                               |
-| `device_observations_device_observed_idx`                            | Device presence / IP history; discovery history      |
-| `device_events_device_occurred_idx`                                  | A device's timeline, newest first (keyset paging)    |
-| `device_events_scan_idx` (partial)                                   | What a scan changed; FK lookup when scans are purged |
-| `port_scan_results_port_observed_idx`                                | Port state history                                   |
-| `alerts_open_idx` (partial)                                          | Unacknowledged alerts (inbox, badge count)           |
-| `alerts_network_created_idx`, `alerts_device_idx`, `alerts_scan_idx` | Alert history; FK lookups                            |
+| Index                                                         | Serves                                               |
+| ------------------------------------------------------------- | ---------------------------------------------------- |
+| `devices_network_mac_key` (unique)                            | Discovery matching by MAC; per-network device lists  |
+| `devices_network_status_idx`                                  | Online/offline counts and filters                    |
+| `devices_network_first_seen_idx`                              | "New devices in the last 24 h"                       |
+| `devices_network_ip_idx`                                      | Looking up a device by current IP                    |
+| `scans_single_active_idx` (partial unique)                    | Enforces one queued/running scan                     |
+| `scans_created_idx`, `scans_type_created_idx` _(Step 9)_      | Scan history, all or by type (keyset pages)          |
+| `scans_network_type_created_idx` _(Step 9)_                   | Scan history of a network; older/newer scan          |
+| `scans_network_discoveries_idx` (partial) _(Step 9)_          | Completed discoveries by time: last scan, presence   |
+| `scans_target_device_created_idx` (partial)                   | Port scans of a device                               |
+| `device_observations_device_observed_idx`                     | Device presence / IP history; discovery history      |
+| `device_events_device_occurred_idx`                           | A device's timeline, newest first (keyset paging)    |
+| `device_events_scan_idx` (partial)                            | What a scan changed; FK lookup when scans are purged |
+| `port_scan_results_port_observed_idx`                         | Port state history                                   |
+| `alerts_open_dedup_key_idx` (partial unique) _(Step 10)_      | One open alert per key; merging repeats              |
+| `alerts_resolved_dedup_key_idx` (partial) _(Step 10)_         | Cooldown: when a key was last resolved               |
+| `alerts_created_idx`, `alerts_status_created_idx` _(Step 10)_ | Alert lists, all or by state (keyset pages); counts  |
+| `alerts_device_idx` (partial)                                 | A device's alerts                                    |
+| `alerts_network_created_idx`, `alerts_scan_idx`               | FK lookups                                           |
 
 ## 4. Device identity
 
@@ -184,6 +188,28 @@ not find; `GET /api/scans/:id` lists them with the same rule. Definitions and pa
 
 The down migration drops the constraint and indexes, restores the previous network index, and
 clears discovery summaries (they did not exist before).
+
+### Alerts (Step 10)
+
+Step 2 created `alerts` as a placeholder with a single `acknowledged_at`; nothing wrote to it.
+The Step 10 migration (`…_alerts.sql`, which refuses to run if the table has rows) reshapes it:
+
+| Column                               | Meaning                                                                                                         |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `type`                               | `new_device`, `device_returned`, `ip_changed` (CHECK)                                                           |
+| `severity`                           | `warning` (new device) or `info`                                                                                |
+| `status`                             | `unread`, `read`, `resolved` (CHECK)                                                                            |
+| `read_at`, `resolved_at`             | Set exactly when the state says so (CHECKs: `read_at` null only while unread; `resolved_at` only when resolved) |
+| `dedup_key`                          | What makes two alerts the same: `<type>:<device id>`                                                            |
+| `occurrences`, `last_occurred_at`    | Repeats merged into the open alert; `created_at` is the first occurrence                                        |
+| `message`, `context`                 | Text, and a snapshot of the device when it last occurred (address, MAC, vendor, previous IP)                    |
+| `device_id`, `scan_id`, `network_id` | The device, the discovery that last saw it, the network                                                         |
+
+**Deduplication in the database.** A partial unique index allows one open alert per
+`dedup_key`. Discovery records each alert with one statement: `INSERT … SELECT … WHERE NOT EXISTS
+(the key was resolved within the cooldown) ON CONFLICT (dedup_key) WHERE status <> 'resolved' DO
+UPDATE SET occurrences = occurrences + 1, …`. Alerts are written in the discovery transaction, so
+a device and its alert commit together. Rules: [ALERTS.md](ALERTS.md).
 
 ## 5. Migrations
 

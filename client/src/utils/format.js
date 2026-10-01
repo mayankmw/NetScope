@@ -93,3 +93,19 @@ export function formatElapsed(ms) {
   if (ms < 60_000) return `${Math.round(ms / 1_000)} s`;
   return formatDuration(ms / 1_000);
 }
+
+/**
+ * A configured interval in its largest whole unit: "24 hours", "7 days", "90 minutes".
+ * @param {number} ms
+ */
+export function formatInterval(ms) {
+  const units = [
+    ['day', 86_400_000],
+    ['hour', 3_600_000],
+    ['minute', 60_000],
+    ['second', 1_000],
+  ];
+  const [unit, size] = units.find(([, size]) => ms >= size && ms % size === 0) ?? units.at(-1);
+  const count = Math.round(ms / size);
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+}

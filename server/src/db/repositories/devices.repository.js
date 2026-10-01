@@ -19,7 +19,7 @@
 export async function upsertDiscoveredDevice(db, networkId, device) {
   const { rows } = await db.query(
     `WITH previous AS (
-       SELECT ip_address, hostname, vendor, device_type, status
+       SELECT ip_address, hostname, vendor, device_type, status, last_seen_at
        FROM devices WHERE network_id = $1 AND mac_address = $2
      ),
      upserted AS (
@@ -41,6 +41,7 @@ export async function upsertDiscoveredDevice(db, networkId, device) {
             previous.vendor      AS previous_vendor,
             previous.device_type AS previous_device_type,
             previous.status      AS previous_status,
+            previous.last_seen_at AS previous_last_seen_at,
             previous.ip_address IS NULL AS is_new
      FROM upserted LEFT JOIN previous ON true`,
     [

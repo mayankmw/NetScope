@@ -9,7 +9,7 @@ const lazyPage = (load, name) => async () => ({ Component: (await load())[name] 
 
 /**
  * Route table. Planned routes (added in their own steps):
- *   /alerts (10) · /reports (11) · /settings
+ *   /reports (11) · /settings
  */
 export const routes = [
   {
@@ -43,6 +43,10 @@ export const routes = [
           {
             path: 'scans/:scanId',
             lazy: lazyPage(() => import('@/pages/ScanDetailsPage'), 'ScanDetailsPage'),
+          },
+          {
+            path: 'alerts',
+            lazy: lazyPage(() => import('@/pages/AlertsPage'), 'AlertsPage'),
           },
           {
             path: 'topology',

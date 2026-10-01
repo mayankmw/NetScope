@@ -1,6 +1,6 @@
 # NetScope API
 
-> Status: **Step 9.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events`, `observations`, and presence `history`), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), the scan history (`GET /api/scans`, `GET /api/scans/:scanId`), and the WebSocket event stream are implemented. Everything else is the plan, and
+> Status: **Step 10.** `GET /api/health`, `GET /api/devices`, `POST /api/devices/discover`, `GET /api/devices/:deviceId` (with its `events`, `observations`, and presence `history`), port scans (`POST /api/devices/:deviceId/scan`, `GET /api/devices/:deviceId/ports`), the scan history (`GET /api/scans`, `GET /api/scans/:scanId`), alerts (`/api/alerts`), and the WebSocket event stream are implemented. Everything else is the plan, and
 > each group is finalized in the step that builds it.
 
 ## 1. Conventions
@@ -287,6 +287,7 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
         "isGateway": true,
         "isSelf": false,
         "isNew": true,
+        "classification": "new",
         "previousIpAddress": null,
         "sources": ["arp", "ping"],
         "firstSeenAt": "2026-09-30T13:34:45.929Z",
@@ -305,30 +306,39 @@ curl -s -X POST http://127.0.0.1:4000/api/devices/discover
         "isGateway": false,
         "isSelf": false,
         "isNew": false,
+        "classification": "ip_changed",
         "previousIpAddress": "192.168.1.20",
         "sources": ["arp", "ping"],
         "firstSeenAt": "2026-09-28T09:12:03.114Z",
         "lastSeenAt": "2026-09-30T13:34:45.929Z"
       }
     ],
-    "unresolvedHosts": []
+    "unresolvedHosts": [],
+    "alerts": {
+      "created": [{ "id": "c0ffee00-…", "type": "ip_changed", "status": "unread", "…": "…" }],
+      "updated": []
+    }
   },
   "error": null
 }
 ```
 
-| Device field        | Meaning                                                                |
-| ------------------- | ---------------------------------------------------------------------- |
-| `id`                | Permanent device ID                                                    |
-| `macIsRandom`       | Randomized/private MAC (no vendor; may change after a reset)           |
-| `deviceType`        | Guess, or the type the user set                                        |
-| `isNew`             | First time this device was seen on this network                        |
-| `previousIpAddress` | Set when the device's IP changed since the last scan                   |
-| `sources`           | Which probes saw it: `arp`, `ping`, `nmap`, `local` (this machine)     |
-| `latencyMs`         | Round-trip time from ping or nmap; `null` if it did not answer a probe |
+| Device field        | Meaning                                                                                                                                      |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                | Permanent device ID                                                                                                                          |
+| `macIsRandom`       | Randomized/private MAC (no vendor; may change after a reset)                                                                                 |
+| `deviceType`        | Guess, or the type the user set                                                                                                              |
+| `isNew`             | First time this device was seen on this network                                                                                              |
+| `classification`    | Compared with before this scan: `new` (MAC never seen on this network), `returned` (was offline), `ip_changed`, or `known` (nothing changed) |
+| `previousIpAddress` | Set when the device's IP changed since the last scan                                                                                         |
+| `sources`           | Which probes saw it: `arp`, `ping`, `nmap`, `local` (this machine)                                                                           |
+| `latencyMs`         | Round-trip time from ping or nmap; `null` if it did not answer a probe                                                                       |
 
 `sources.*.status` is `ok`, `unavailable` (tool missing), `failed` (ran but errored), or
 `skipped` (disabled). Only an unreadable ARP cache fails the whole discovery.
+
+`alerts` lists the alerts this scan raised (`created`) and the open alerts it repeated into
+(`updated`); same shape as `GET /api/alerts`. Rules: [ALERTS.md](ALERTS.md).
 
 `summary` is also stored with the scan (`GET /api/scans`) and sent in `discovery.completed`:
 
@@ -819,6 +829,117 @@ network, or port scans of the same device, in list order), and, once completed, 
 Errors: `400 VALIDATION_ERROR` (malformed `scanId`, any query parameter), `404 NOT_FOUND`
 (`details.scanId`), `503 DATABASE_UNAVAILABLE`.
 
+### `GET /api/alerts`
+
+Alerts raised by discovery, newest first (by when each was first raised). Cursor-paginated (§5).
+How alerts are decided, deduplicated, and kept quiet: [ALERTS.md](ALERTS.md).
+
+| Query      | Values                                                                 |
+| ---------- | ---------------------------------------------------------------------- |
+| `status`   | `open` (unread and read), `unread`, `read`, or `resolved`; default all |
+| `type`     | `new_device`, `device_returned`, or `ip_changed`                       |
+| `deviceId` | Alerts about one device                                                |
+| `limit`    | 1–100, default 20                                                      |
+| `before`   | `nextCursor` of the previous page (an alert id)                        |
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "c0ffee00-0000-4000-8000-000000000001",
+      "type": "new_device",
+      "severity": "warning",
+      "status": "unread",
+      "message": "New device on the network: Espressif Inc. device at 192.168.1.77 (MAC 24:6f:28:00:00:77).",
+      "network": { "id": "5c50d134-16e1-401a-8a6a-2940b6e9d204", "cidr": "192.168.1.0/24" },
+      "device": {
+        "id": "a66c3856-4beb-4b2f-ba94-3e6bbf54b6ae",
+        "ipAddress": "192.168.1.77",
+        "macAddress": "24:6f:28:00:00:77",
+        "macIsRandom": false,
+        "hostname": null,
+        "displayName": null,
+        "vendor": "Espressif Inc.",
+        "deviceType": "iot",
+        "status": "online",
+        "isGateway": false
+      },
+      "scanId": "75966ed9-3a30-4bf8-8847-f7028d8d16e0",
+      "context": {
+        "ipAddress": "192.168.1.77",
+        "macAddress": "24:6f:28:00:00:77",
+        "macIsRandom": false,
+        "hostname": null,
+        "vendor": "Espressif Inc.",
+        "deviceType": "iot"
+      },
+      "occurrences": 1,
+      "createdAt": "2026-10-01T14:13:46.405Z",
+      "lastOccurredAt": "2026-10-01T14:13:46.405Z",
+      "readAt": null,
+      "resolvedAt": null,
+      "updatedAt": "2026-10-01T14:13:46.405Z"
+    }
+  ],
+  "error": null,
+  "meta": { "limit": 20, "nextCursor": null }
+}
+```
+
+| Field         | Meaning                                                                                                                                          |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `type`        | `new_device` (a MAC never seen on this network), `device_returned` (back after a long absence), `ip_changed`                                     |
+| `severity`    | `warning` for a new device, `info` otherwise                                                                                                     |
+| `status`      | `unread`, `read`, or `resolved`                                                                                                                  |
+| `device`      | The device as it is now; `null` if it was deleted                                                                                                |
+| `context`     | The device when the alert last occurred; `ip_changed` and `device_returned` add `previousIpAddress`, the latter also `lastSeenAt` and `absentMs` |
+| `scanId`      | The discovery that last saw it happen                                                                                                            |
+| `occurrences` | How many times it happened while the alert was open; `createdAt` is the first, `lastOccurredAt` the latest                                       |
+
+Errors: `400 VALIDATION_ERROR` (unknown `status` or `type`, malformed id or cursor, `limit`
+outside 1–100, unknown parameter), `503 DATABASE_UNAVAILABLE`.
+
+### `GET /api/alerts/summary`
+
+Counts by state (the navigation badge) and the settings of the alert rules.
+
+```json
+{
+  "success": true,
+  "data": {
+    "counts": { "unread": 2, "read": 5, "resolved": 14 },
+    "policy": { "returnAfterMs": 86400000, "cooldownMs": 86400000 }
+  },
+  "error": null
+}
+```
+
+### `GET /api/alerts/:alertId`
+
+One alert, as in the list. Errors: `400`, `404 NOT_FOUND` (`details.alertId`), `503`.
+
+### `PATCH /api/alerts/:alertId`
+
+Moves an alert to another state. Body: `{ "status": "unread" | "read" | "resolved" }` (nothing
+else is accepted). Returns the alert and announces `alert.updated` (only when the state changed).
+
+| From → to       | Effect                                                                 |
+| --------------- | ---------------------------------------------------------------------- |
+| unread → read   | `readAt` set                                                           |
+| read → unread   | `readAt` cleared                                                       |
+| any → resolved  | `resolvedAt` set (and `readAt`, if it was unread); starts the cooldown |
+| resolved → read | Reopened: `resolvedAt` cleared                                         |
+
+Errors: `400 VALIDATION_ERROR`, `404 NOT_FOUND`, `409 CONFLICT` (reopening while a newer open alert
+exists for the same device and change), `503 DATABASE_UNAVAILABLE`.
+
+### `POST /api/alerts/read-all` and `POST /api/alerts/resolve-all`
+
+Marks every unread alert read, or resolves every open alert. No input (an empty body or `{}`).
+Returns `{ "updated": 3, "counts": { "unread": 0, "read": 4, "resolved": 14 } }` and announces
+`alerts.updated` when anything changed.
+
 ## 7. WebSocket
 
 Live events at `ws://<host>:<port>/ws` (`WS_PATH`), on the API's own port. In development the UI
@@ -862,14 +983,17 @@ contract changes. Unknown `type`s must be ignored by clients.
 | `portscan.started`    | A port scan was recorded and is running                 | `scanId`, `deviceId`, `networkId`, `ipAddress`, `startedAt`, `triggeredBy`                                                                                                                          |
 | `portscan.completed`  | A port scan finished and its results are committed      | `scanId`, `deviceId`, `networkId`, `finishedAt`, `durationMs`, `summary`                                                                                                                            |
 | `portscan.failed`     | A started port scan failed, timed out, or was cancelled | `scanId`, `deviceId`, `networkId`, `error: { code, message }`                                                                                                                                       |
+| `alert.created`       | A discovery raised a new alert                          | `alert` (as in `GET /api/alerts`), `counts` (`{ unread, read, resolved }` after it)                                                                                                                 |
+| `alert.updated`       | A repeat merged into an open alert, or a state change   | `alert`, `counts`, `reason` (`repeated` or `status`)                                                                                                                                                |
+| `alerts.updated`      | Mark all read or resolve all                            | `ids`, `status`, `counts`                                                                                                                                                                           |
 
 `device` has the same shape as in `GET /api/devices` (including `isGateway`, `isSelf`, and `updatedAt`).
 A device seen again with no change produces no device event: `discovery.completed.seenDeviceIds`
 lists every device seen, whose `lastSeenAt` is `finishedAt`.
 
-**Order per discovery:** `discovery.started` → device events → `discovery.completed`, or
-`discovery.started` → `discovery.failed`. Device events and `discovery.completed` are sent only
-after the database transaction commits. A request rejected before the run starts (e.g. `409`)
+**Order per discovery:** `discovery.started` → device events → alert events →
+`discovery.completed`, or `discovery.started` → `discovery.failed`. Device events, alert events,
+and `discovery.completed` are sent only after the database transaction commits. A request rejected before the run starts (e.g. `409`)
 sends nothing.
 
 Example `device.updated`:
@@ -952,13 +1076,16 @@ Port scans are started per device (`POST /api/devices/:deviceId/scan`, Step 7, a
 | `GET /api/network/overview` | 4–5  | Dashboard counts (total, online, new) and network health                                             |
 | `GET /api/network/topology` | —    | Not needed: the topology is built in the client from `GET /api/devices` ([TOPOLOGY.md](TOPOLOGY.md)) |
 
-### `/api/alerts` _(Step 10)_
+### `/api/alerts`
 
-| Method & path                      | Purpose                             |
-| ---------------------------------- | ----------------------------------- |
-| `GET /api/alerts`                  | List alerts (`?acknowledged=false`) |
-| `PATCH /api/alerts/:alertId`       | Acknowledge one alert               |
-| `POST /api/alerts/acknowledge-all` | Acknowledge all open alerts         |
+| Method & path                  | Step  | Purpose                                 |
+| ------------------------------ | ----- | --------------------------------------- |
+| `GET /api/alerts`              | 10 ✅ | List alerts (implemented, see above)    |
+| `GET /api/alerts/summary`      | 10 ✅ | Counts by state and the rules' settings |
+| `GET /api/alerts/:alertId`     | 10 ✅ | One alert                               |
+| `PATCH /api/alerts/:alertId`   | 10 ✅ | Mark unread / read / resolved           |
+| `POST /api/alerts/read-all`    | 10 ✅ | Mark every unread alert read            |
+| `POST /api/alerts/resolve-all` | 10 ✅ | Resolve every open alert                |
 
 ### `/api/reports` _(Step 11)_
 

@@ -4,6 +4,7 @@ import { EmptyState } from '@/components/common/EmptyState';
 import { ErrorState } from '@/components/common/ErrorState';
 import { GlassPanel } from '@/components/common/GlassPanel';
 import { DeviceActivity } from '@/components/device-details/DeviceActivity';
+import { DeviceAlerts } from '@/components/device-details/DeviceAlerts';
 import { DeviceDetailsSkeleton } from '@/components/device-details/DeviceDetailsSkeleton';
 import { BackLink, DeviceHeader } from '@/components/device-details/DeviceHeader';
 import { DeviceIdentityCard } from '@/components/device-details/DeviceIdentityCard';
@@ -19,13 +20,13 @@ import { useDeviceStore } from '@/stores/useDeviceStore';
 import { backLink } from '@/utils/deviceLinks';
 
 /**
- * One device in detail: status, identity, network, presence history, open ports, activity, and
- * metadata. Updates live.
+ * One device in detail: status, alerts, identity, network, presence history, open ports,
+ * activity, and metadata. Updates live.
  *
- * Panels are ordered for reading on a phone (status, identity, network, presence, ports,
+ * Panels are ordered for reading on a phone (status, alerts, identity, network, presence, ports,
  * activity, metadata); on wide screens the column wrappers become two columns (`contents` →
- * `flex`): status, presence, ports, activity, and metadata on the left; identity and network on
- * the right.
+ * `flex`): status, alerts, presence, ports, activity, and metadata on the left; identity and
+ * network on the right. Alerts appear only for a device that raised some.
  */
 export function DeviceDetailsPage() {
   const { deviceId } = useParams();
@@ -120,25 +121,26 @@ export function DeviceDetailsPage() {
             highlight={changedAt !== null}
             className="order-1"
           />
+          <DeviceAlerts deviceId={device.id} now={now} className="order-2" />
           <DevicePresenceHistory
             presence={state.presenceHistory}
             onRangeChange={state.setPresenceDays}
             onRetry={state.retryPresence}
-            className="order-4"
+            className="order-5"
           />
-          <DevicePorts device={device} now={now} className="order-5" />
+          <DevicePorts device={device} now={now} className="order-6" />
           <DeviceActivity
             events={state.events}
             observations={state.observations}
             now={now}
             onLoadMore={loadMore}
             onRetry={retryHistory}
-            className="order-6"
+            className="order-7"
           />
-          <DeviceMetadata device={device} network={network} className="order-7" />
+          <DeviceMetadata device={device} network={network} className="order-8" />
         </div>
         <div className="contents lg:flex lg:flex-col lg:gap-4">
-          <DeviceIdentityCard device={device} className="order-2" />
+          <DeviceIdentityCard device={device} className="order-3" />
           <DeviceNetworkCard
             device={device}
             network={network}
@@ -146,7 +148,7 @@ export function DeviceDetailsPage() {
             ipHistory={ipHistory}
             localInterface={localInterface}
             now={now}
-            className="order-3"
+            className="order-4"
           />
         </div>
       </div>

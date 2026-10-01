@@ -200,7 +200,10 @@
  * @property {object} network
  * @property {DiscoverySummary} summary
  * @property {Record<string, { status: string }>} sources
- * @property {Array<Device & { isNew: boolean, previousIpAddress: string | null }>} devices
+ * @property {Array<Device & { isNew: boolean, previousIpAddress: string | null,
+ *             classification: 'new' | 'returned' | 'ip_changed' | 'known' }>} devices
+ * @property {{ created: Alert[], updated: Alert[] }} alerts raised by this scan, or repeated into
+ *   an open alert
  * @property {string[]} unresolvedHosts
  */
 
@@ -270,6 +273,41 @@
  *             triggeredBy: 'manual' | 'schedule', seen: boolean, ipAddress: string | null,
  *             latencyMs: number | null }> }} scans completed discoveries since first seen in the
  *   range, newest first (at most 100 listed)
+ */
+
+/**
+ * @typedef {object} AlertCounts
+ * @property {number} unread
+ * @property {number} read
+ * @property {number} resolved
+ */
+
+/**
+ * @typedef {object} AlertSummary GET /api/alerts/summary
+ * @property {AlertCounts} counts
+ * @property {{ returnAfterMs: number, cooldownMs: number }} policy
+ */
+
+/**
+ * @typedef {object} Alert
+ * @property {string} id
+ * @property {'new_device' | 'device_returned' | 'ip_changed'} type
+ * @property {'info' | 'warning'} severity
+ * @property {'unread' | 'read' | 'resolved'} status
+ * @property {string} message
+ * @property {{ id: string, cidr: string }} network
+ * @property {(Device & { isGateway: boolean }) | null} device as it is now (null once deleted)
+ * @property {string | null} scanId the scan that last saw it happen
+ * @property {{ ipAddress: string, macAddress: string, macIsRandom: boolean,
+ *              hostname: string | null, vendor: string | null, deviceType: string,
+ *              previousIpAddress?: string | null, lastSeenAt?: string, absentMs?: number }} context
+ *   the device when the alert last occurred
+ * @property {number} occurrences how many times it happened while open
+ * @property {string} createdAt first time
+ * @property {string} lastOccurredAt
+ * @property {string | null} readAt
+ * @property {string | null} resolvedAt
+ * @property {string} updatedAt
  */
 
 export {};

@@ -30,6 +30,11 @@ export const EventTypes = Object.freeze({
   PORT_SCAN_STARTED: 'portscan.started',
   PORT_SCAN_COMPLETED: 'portscan.completed',
   PORT_SCAN_FAILED: 'portscan.failed',
+
+  // Alerts (server → all clients)
+  ALERT_CREATED: 'alert.created',
+  ALERT_UPDATED: 'alert.updated',
+  ALERTS_UPDATED: 'alerts.updated',
 });
 
 /** Messages a client may send. Anything else is rejected. */
